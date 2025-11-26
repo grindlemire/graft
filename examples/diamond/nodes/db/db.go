@@ -39,4 +39,3 @@ func run(ctx context.Context) (Output, error) {
 		PoolSize:  10,
 	}, nil
 }
-

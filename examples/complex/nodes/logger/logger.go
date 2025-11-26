@@ -44,4 +44,3 @@ func run(ctx context.Context) (Output, error) {
 		Format: "json",
 	}, nil
 }
-

@@ -46,4 +46,3 @@ func run(ctx context.Context) (Output, error) {
 		Version: "2.0.0",
 	}, nil
 }
-

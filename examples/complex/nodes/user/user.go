@@ -46,4 +46,3 @@ func run(ctx context.Context) (Output, error) {
 		Endpoint: "/api/users",
 	}, nil
 }
-

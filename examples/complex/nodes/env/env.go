@@ -33,4 +33,3 @@ func run(ctx context.Context) (Output, error) {
 		Debug:       false,
 	}, nil
 }
-

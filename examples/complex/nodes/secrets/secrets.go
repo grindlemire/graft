@@ -41,4 +41,3 @@ func run(ctx context.Context) (Output, error) {
 		DatabasePwd: "db-password",
 	}, nil
 }
-

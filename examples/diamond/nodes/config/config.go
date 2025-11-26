@@ -37,4 +37,3 @@ func run(ctx context.Context) (Output, error) {
 		RedisPort: 6379,
 	}, nil
 }
-

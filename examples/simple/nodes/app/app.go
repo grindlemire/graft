@@ -39,4 +39,3 @@ func run(ctx context.Context) (Output, error) {
 		Version: "1.0.0",
 	}, nil
 }
-

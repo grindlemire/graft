@@ -76,4 +76,3 @@ func run(ctx context.Context) (Output, error) {
 		Services:      names,
 	}, nil
 }
-

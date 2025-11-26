@@ -39,4 +39,3 @@ func run(ctx context.Context) (Output, error) {
 		Endpoint: "/api/admin",
 	}, nil
 }
-

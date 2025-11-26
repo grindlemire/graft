@@ -33,4 +33,3 @@ func main() {
 	fmt.Printf("Total execution time: %v\n", elapsed)
 	fmt.Println("(db and cache ran in parallel, so total is less than sum of all nodes)")
 }
-

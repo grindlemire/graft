@@ -50,4 +50,3 @@ func run(ctx context.Context) (Output, error) {
 		},
 	}, nil
 }
-

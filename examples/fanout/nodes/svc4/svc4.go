@@ -36,4 +36,3 @@ func run(ctx context.Context) (Output, error) {
 	fmt.Println("[svc4] Done")
 	return Output{Name: "service-4", Result: 400}, nil
 }
-

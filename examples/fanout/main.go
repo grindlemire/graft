@@ -37,4 +37,3 @@ func main() {
 	fmt.Println("All 5 services ran in parallel!")
 	fmt.Println("Sequential would be: ~1020ms")
 }
-

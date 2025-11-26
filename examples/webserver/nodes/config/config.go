@@ -39,4 +39,3 @@ func run(ctx context.Context) (Output, error) {
 		MetricsHost: "localhost:9090",
 	}, nil
 }
-

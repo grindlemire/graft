@@ -38,4 +38,3 @@ func main() {
 	fmt.Printf("Total execution time: %v\n", elapsed)
 	fmt.Println("9 nodes executed in 5 parallel levels")
 }
-

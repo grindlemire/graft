@@ -43,4 +43,3 @@ func run(ctx context.Context) (Output, error) {
 		ErrorRate:     errorRate,
 	}, nil
 }
-

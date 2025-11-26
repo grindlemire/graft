@@ -47,4 +47,3 @@ func run(ctx context.Context) (Output, error) {
 		JWTSecretLen: len(sec.JWTSecret),
 	}, nil
 }
-

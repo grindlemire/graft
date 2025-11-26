@@ -28,4 +28,3 @@ func main() {
 		fmt.Printf("%s: %+v\n", id, result)
 	}
 }
-
