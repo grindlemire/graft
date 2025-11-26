@@ -9,7 +9,7 @@ A graph-based dependency execution framework for Go. Nodes declare their depende
 
 ## Why?
 
-I don't particularly like dependency injection libraries because the existing frameworks feel too magical. They also rely on runtime tricks like reflection or require code gen. However in large code bases it is useful to specify dependencies as graphs rather than passing arguments everywhere and managing dependency sphaghetti.
+I don't particularly like dependency injection libraries because the existing frameworks feel too magical. They also rely on runtime tricks like reflection or require code gen. However in large code bases it is useful to specify dependencies as graphs rather than passing arguments everywhere and managing dependency spaghetti.
 
 This library tries to provide a middle ground that has very little magic while ensuring dependencies "just show up" for the packages that depend on them.
 
