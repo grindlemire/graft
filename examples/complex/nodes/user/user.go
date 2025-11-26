@@ -10,7 +10,7 @@ import (
 	"github.com/grindlemire/graft/examples/complex/nodes/db"
 )
 
-const ID = "user"
+const ID graft.ID = "user"
 
 type Output struct {
 	Ready    bool
@@ -20,7 +20,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{db.ID, auth.ID},
+		DependsOn: []graft.ID{db.ID, auth.ID},
 		Run:       run,
 	})
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/grindlemire/graft"
 )
 
-const ID = "env"
+const ID graft.ID = "env"
 
 type Output struct {
 	Environment string
@@ -18,7 +18,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{},
+		DependsOn: []graft.ID{},
 		Run:       run,
 	})
 }

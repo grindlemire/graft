@@ -9,7 +9,7 @@ import (
 	"github.com/grindlemire/graft/examples/complex/nodes/env"
 )
 
-const ID = "secrets"
+const ID graft.ID = "secrets"
 
 type Output struct {
 	JWTSecret   string
@@ -20,7 +20,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{env.ID},
+		DependsOn: []graft.ID{env.ID},
 		Run:       run,
 	})
 }

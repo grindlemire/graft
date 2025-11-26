@@ -9,7 +9,7 @@ import (
 	"github.com/grindlemire/graft/examples/complex/nodes/env"
 )
 
-const ID = "logger"
+const ID graft.ID = "logger"
 
 type Output struct {
 	Level  string
@@ -19,7 +19,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{env.ID},
+		DependsOn: []graft.ID{env.ID},
 		Run:       run,
 	})
 }
