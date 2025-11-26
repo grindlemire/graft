@@ -16,7 +16,7 @@ import (
 // The engine is safe for concurrent use after creation, but Run should
 // only be called once per engine instance.
 type Engine struct {
-	nodes   map[string]node
+	nodes   map[ID]node
 	results results
 	mu      sync.RWMutex
 }
@@ -28,7 +28,7 @@ type Engine struct {
 //
 // For most use cases, prefer [Build] which uses the global registry,
 // or [Builder.BuildFor] for subgraph execution.
-func New(nodes map[string]node) *Engine {
+func New(nodes map[ID]node) *Engine {
 	return &Engine{
 		nodes:   nodes,
 		results: make(results),
@@ -98,13 +98,13 @@ func (e *Engine) Run(ctx context.Context) error {
 }
 
 // runLevel executes all nodes in a level concurrently.
-func (e *Engine) runLevel(ctx context.Context, level []string) error {
+func (e *Engine) runLevel(ctx context.Context, level []ID) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(level))
 
 	for _, id := range level {
 		wg.Add(1)
-		go func(nodeID string) {
+		go func(nodeID ID) {
 			defer wg.Done()
 
 			n := e.nodes[nodeID]
@@ -162,7 +162,7 @@ func (e *Engine) copyResults() results {
 //	engine.Run(ctx)
 //	results := engine.Results()
 //	dbPool := results["db"].(*sql.DB)
-func (e *Engine) Results() map[string]any {
+func (e *Engine) Results() map[ID]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.copyResults()
@@ -176,9 +176,9 @@ func (e *Engine) Results() map[string]any {
 //
 // Returns an error if a cycle is detected or if a node depends on an
 // unknown node.
-func (e *Engine) topoSortLevels() ([][]string, error) {
+func (e *Engine) topoSortLevels() ([][]ID, error) {
 	// Build in-degree map (count of dependencies for each node)
-	inDegree := make(map[string]int)
+	inDegree := make(map[ID]int)
 	for id := range e.nodes {
 		inDegree[id] = 0
 	}
@@ -194,7 +194,7 @@ func (e *Engine) topoSortLevels() ([][]string, error) {
 	}
 
 	// Build reverse adjacency list (who depends on me)
-	dependents := make(map[string][]string)
+	dependents := make(map[ID][]ID)
 	for _, n := range e.nodes {
 		for _, dep := range n.dependsOn {
 			dependents[dep] = append(dependents[dep], n.id)
@@ -202,7 +202,7 @@ func (e *Engine) topoSortLevels() ([][]string, error) {
 	}
 
 	// Find nodes with no dependencies (first level)
-	var currentLevel []string
+	var currentLevel []ID
 	for id, degree := range inDegree {
 		if degree == 0 {
 			currentLevel = append(currentLevel, id)
@@ -210,14 +210,14 @@ func (e *Engine) topoSortLevels() ([][]string, error) {
 	}
 
 	// Process level by level
-	var levels [][]string
+	var levels [][]ID
 	processed := 0
 
 	for len(currentLevel) > 0 {
 		levels = append(levels, currentLevel)
 		processed += len(currentLevel)
 
-		var nextLevel []string
+		var nextLevel []ID
 		for _, id := range currentLevel {
 			for _, dependent := range dependents[id] {
 				inDegree[dependent]--

@@ -9,7 +9,7 @@ import (
 )
 
 // makeNode is a test helper that creates a type-erased node for direct engine testing.
-func makeNode(id string, dependsOn []string, run func(ctx context.Context) (any, error)) node {
+func makeNode(id ID, dependsOn []ID, run func(ctx context.Context) (any, error)) node {
 	return node{
 		id:        id,
 		dependsOn: dependsOn,
@@ -19,23 +19,23 @@ func makeNode(id string, dependsOn []string, run func(ctx context.Context) (any,
 
 func TestNew(t *testing.T) {
 	type tc struct {
-		nodes     map[string]node
+		nodes     map[ID]node
 		wantCount int
 	}
 
 	tests := map[string]tc{
 		"empty nodes": {
-			nodes:     map[string]node{},
+			nodes:     map[ID]node{},
 			wantCount: 0,
 		},
 		"single node": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return nil, nil }),
 			},
 			wantCount: 1,
 		},
 		"multiple nodes": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return nil, nil }),
 				"b": makeNode("b", nil, func(ctx context.Context) (any, error) { return nil, nil }),
 				"c": makeNode("c", nil, func(ctx context.Context) (any, error) { return nil, nil }),
@@ -59,70 +59,70 @@ func TestNew(t *testing.T) {
 
 func TestEngineRun(t *testing.T) {
 	type tc struct {
-		nodes       map[string]node
+		nodes       map[ID]node
 		wantErr     bool
 		errSubstr   string
-		wantResults map[string]any
+		wantResults map[ID]any
 	}
 
 	tests := map[string]tc{
 		"empty graph": {
-			nodes:       map[string]node{},
+			nodes:       map[ID]node{},
 			wantErr:     false,
-			wantResults: map[string]any{},
+			wantResults: map[ID]any{},
 		},
 		"single node": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return "resultA", nil }),
 			},
 			wantErr:     false,
-			wantResults: map[string]any{"a": "resultA"},
+			wantResults: map[ID]any{"a": "resultA"},
 		},
 		"two independent nodes": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 1, nil }),
 				"b": makeNode("b", nil, func(ctx context.Context) (any, error) { return 2, nil }),
 			},
 			wantErr:     false,
-			wantResults: map[string]any{"a": 1, "b": 2},
+			wantResults: map[ID]any{"a": 1, "b": 2},
 		},
 		"linear dependency chain": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 10, nil }),
-				"b": makeNode("b", []string{"a"}, func(ctx context.Context) (any, error) {
+				"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
 					val, _ := Dep[int](ctx, "a")
 					return val * 2, nil
 				}),
-				"c": makeNode("c", []string{"b"}, func(ctx context.Context) (any, error) {
+				"c": makeNode("c", []ID{"b"}, func(ctx context.Context) (any, error) {
 					val, _ := Dep[int](ctx, "b")
 					return val * 2, nil
 				}),
 			},
 			wantErr:     false,
-			wantResults: map[string]any{"a": 10, "b": 20, "c": 40},
+			wantResults: map[ID]any{"a": 10, "b": 20, "c": 40},
 		},
 		"diamond dependency": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 1, nil }),
-				"b": makeNode("b", []string{"a"}, func(ctx context.Context) (any, error) {
+				"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
 					val, _ := Dep[int](ctx, "a")
 					return val + 10, nil
 				}),
-				"c": makeNode("c", []string{"a"}, func(ctx context.Context) (any, error) {
+				"c": makeNode("c", []ID{"a"}, func(ctx context.Context) (any, error) {
 					val, _ := Dep[int](ctx, "a")
 					return val + 100, nil
 				}),
-				"d": makeNode("d", []string{"b", "c"}, func(ctx context.Context) (any, error) {
+				"d": makeNode("d", []ID{"b", "c"}, func(ctx context.Context) (any, error) {
 					b, _ := Dep[int](ctx, "b")
 					c, _ := Dep[int](ctx, "c")
 					return b + c, nil
 				}),
 			},
 			wantErr:     false,
-			wantResults: map[string]any{"a": 1, "b": 11, "c": 101, "d": 112},
+			wantResults: map[ID]any{"a": 1, "b": 11, "c": 101, "d": 112},
 		},
 		"node returns error": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) {
 					return nil, errors.New("intentional failure")
 				}),
@@ -131,8 +131,8 @@ func TestEngineRun(t *testing.T) {
 			errSubstr: "node a: intentional failure",
 		},
 		"dependency on unknown node": {
-			nodes: map[string]node{
-				"a": makeNode("a", []string{"unknown"}, func(ctx context.Context) (any, error) { return nil, nil }),
+			nodes: map[ID]node{
+				"a": makeNode("a", []ID{"unknown"}, func(ctx context.Context) (any, error) { return nil, nil }),
 			},
 			wantErr:   true,
 			errSubstr: "depends on unknown node",
@@ -197,7 +197,7 @@ func TestEngineRunContextCancellation(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			nodes := map[string]node{
+			nodes := map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) {
 					return "done", nil
 				}),
@@ -231,7 +231,7 @@ func TestEngineRunContextCancelledBetweenLevels(t *testing.T) {
 	level1Done := make(chan struct{})
 	cancelComplete := make(chan struct{})
 
-	nodes := map[string]node{
+	nodes := map[ID]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) {
 			close(level1Done)
 			// Wait for cancel to complete before returning, ensuring the context
@@ -239,7 +239,7 @@ func TestEngineRunContextCancelledBetweenLevels(t *testing.T) {
 			<-cancelComplete
 			return "a", nil
 		}),
-		"b": makeNode("b", []string{"a"}, func(ctx context.Context) (any, error) {
+		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
 			// This should not run if context is cancelled between levels
 			t.Error("node b should not have run - context was cancelled between levels")
 			return "b", nil
@@ -268,7 +268,7 @@ func TestEngineRunContextCancelledBetweenLevels(t *testing.T) {
 
 func TestTopoSortLevels(t *testing.T) {
 	type tc struct {
-		nodes      map[string]node
+		nodes      map[ID]node
 		wantLevels int
 		wantErr    bool
 		errSubstr  string
@@ -276,19 +276,19 @@ func TestTopoSortLevels(t *testing.T) {
 
 	tests := map[string]tc{
 		"empty graph": {
-			nodes:      map[string]node{},
+			nodes:      map[ID]node{},
 			wantLevels: 0,
 			wantErr:    false,
 		},
 		"single node": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, nil),
 			},
 			wantLevels: 1,
 			wantErr:    false,
 		},
 		"two independent nodes - same level": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, nil),
 				"b": makeNode("b", nil, nil),
 			},
@@ -296,51 +296,51 @@ func TestTopoSortLevels(t *testing.T) {
 			wantErr:    false,
 		},
 		"linear chain - three levels": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, nil),
-				"b": makeNode("b", []string{"a"}, nil),
-				"c": makeNode("c", []string{"b"}, nil),
+				"b": makeNode("b", []ID{"a"}, nil),
+				"c": makeNode("c", []ID{"b"}, nil),
 			},
 			wantLevels: 3,
 			wantErr:    false,
 		},
 		"diamond - three levels": {
-			nodes: map[string]node{
+			nodes: map[ID]node{
 				"a": makeNode("a", nil, nil),
-				"b": makeNode("b", []string{"a"}, nil),
-				"c": makeNode("c", []string{"a"}, nil),
-				"d": makeNode("d", []string{"b", "c"}, nil),
+				"b": makeNode("b", []ID{"a"}, nil),
+				"c": makeNode("c", []ID{"a"}, nil),
+				"d": makeNode("d", []ID{"b", "c"}, nil),
 			},
 			wantLevels: 3,
 			wantErr:    false,
 		},
 		"cycle detection - self loop": {
-			nodes: map[string]node{
-				"a": makeNode("a", []string{"a"}, nil),
+			nodes: map[ID]node{
+				"a": makeNode("a", []ID{"a"}, nil),
 			},
 			wantErr:   true,
 			errSubstr: "cycle detected",
 		},
 		"cycle detection - two node cycle": {
-			nodes: map[string]node{
-				"a": makeNode("a", []string{"b"}, nil),
-				"b": makeNode("b", []string{"a"}, nil),
+			nodes: map[ID]node{
+				"a": makeNode("a", []ID{"b"}, nil),
+				"b": makeNode("b", []ID{"a"}, nil),
 			},
 			wantErr:   true,
 			errSubstr: "cycle detected",
 		},
 		"cycle detection - three node cycle": {
-			nodes: map[string]node{
-				"a": makeNode("a", []string{"c"}, nil),
-				"b": makeNode("b", []string{"a"}, nil),
-				"c": makeNode("c", []string{"b"}, nil),
+			nodes: map[ID]node{
+				"a": makeNode("a", []ID{"c"}, nil),
+				"b": makeNode("b", []ID{"a"}, nil),
+				"c": makeNode("c", []ID{"b"}, nil),
 			},
 			wantErr:   true,
 			errSubstr: "cycle detected",
 		},
 		"unknown dependency": {
-			nodes: map[string]node{
-				"a": makeNode("a", []string{"missing"}, nil),
+			nodes: map[ID]node{
+				"a": makeNode("a", []ID{"missing"}, nil),
 			},
 			wantErr:   true,
 			errSubstr: "depends on unknown node",
@@ -371,7 +371,7 @@ func TestTopoSortLevels(t *testing.T) {
 			}
 
 			// Verify all nodes are present exactly once
-			seen := make(map[string]bool)
+			seen := make(map[ID]bool)
 			for _, level := range levels {
 				for _, id := range level {
 					if seen[id] {
@@ -405,7 +405,7 @@ func TestParallelExecution(t *testing.T) {
 		}
 	}
 
-	nodes := map[string]node{
+	nodes := map[ID]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) {
 			done := trackConcurrency()
 			defer done()
@@ -447,7 +447,7 @@ func TestParallelExecution(t *testing.T) {
 
 func TestResultsThreadSafety(t *testing.T) {
 	// Ensure Results() returns a copy, not the internal map
-	nodes := map[string]node{
+	nodes := map[ID]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return "value", nil }),
 	}
 
@@ -470,25 +470,25 @@ func TestResultsThreadSafety(t *testing.T) {
 
 func TestCopyResults(t *testing.T) {
 	type tc struct {
-		initial map[string]any
+		initial map[ID]any
 	}
 
 	tests := map[string]tc{
 		"empty results": {
-			initial: map[string]any{},
+			initial: map[ID]any{},
 		},
 		"single result": {
-			initial: map[string]any{"a": 1},
+			initial: map[ID]any{"a": 1},
 		},
 		"multiple results": {
-			initial: map[string]any{"a": 1, "b": "two", "c": 3.0},
+			initial: map[ID]any{"a": 1, "b": "two", "c": 3.0},
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			e := &Engine{
-				nodes:   make(map[string]node),
+				nodes:   make(map[ID]node),
 				results: make(results),
 			}
 			for k, v := range tt.initial {

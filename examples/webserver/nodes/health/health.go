@@ -8,7 +8,7 @@ import (
 	"github.com/grindlemire/graft"
 )
 
-const ID = "health"
+const ID graft.ID = "health"
 
 type Output struct {
 	Status    string
@@ -18,7 +18,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{}, // no dependencies - standalone health check
+		DependsOn: []graft.ID{}, // no dependencies - standalone health check
 		Run:       run,
 	})
 }

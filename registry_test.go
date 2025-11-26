@@ -64,7 +64,7 @@ func TestRegister(t *testing.T) {
 
 			// Verify each node is present
 			for _, id := range tt.wantIDs {
-				if _, exists := registry[id]; !exists {
+				if _, exists := registry[ID(id)]; !exists {
 					t.Errorf("node %q not found in registry", id)
 				}
 			}
@@ -144,15 +144,15 @@ func TestRegistryReturnsCopy(t *testing.T) {
 	copy2 := Registry()
 
 	// Modify copy1
-	copy1["modified"] = node{id: "modified"}
+	copy1[ID("modified")] = node{id: "modified"}
 
 	// copy2 should be unaffected
-	if _, exists := copy2["modified"]; exists {
+	if _, exists := copy2[ID("modified")]; exists {
 		t.Error("Registry() did not return a copy; modification affected other copy")
 	}
 
 	// Original registry should be unaffected
-	if _, exists := registry["modified"]; exists {
+	if _, exists := registry[ID("modified")]; exists {
 		t.Error("Registry() did not return a copy; modification affected original registry")
 	}
 }
@@ -162,7 +162,7 @@ func TestBuildFromRegistry(t *testing.T) {
 		setup       func()
 		wantCount   int
 		verifyRun   bool
-		wantResults map[string]any
+		wantResults map[ID]any
 	}
 
 	tests := map[string]tc{
@@ -178,7 +178,7 @@ func TestBuildFromRegistry(t *testing.T) {
 			},
 			wantCount:   2,
 			verifyRun:   true,
-			wantResults: map[string]any{"a": 1, "b": 2},
+			wantResults: map[ID]any{"a": 1, "b": 2},
 		},
 	}
 
@@ -248,7 +248,7 @@ func TestTypedNodeExecution(t *testing.T) {
 
 	Register(Node[ConfigOutput]{
 		ID:        "config",
-		DependsOn: []string{},
+		DependsOn: []ID{},
 		Run: func(ctx context.Context) (ConfigOutput, error) {
 			return ConfigOutput{Host: "localhost", Port: 5432}, nil
 		},
@@ -256,7 +256,7 @@ func TestTypedNodeExecution(t *testing.T) {
 
 	Register(Node[string]{
 		ID:        "db",
-		DependsOn: []string{"config"},
+		DependsOn: []ID{"config"},
 		Run: func(ctx context.Context) (string, error) {
 			cfg, err := Dep[ConfigOutput](ctx, "config")
 			if err != nil {

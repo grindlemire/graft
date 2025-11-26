@@ -20,7 +20,7 @@ import "fmt"
 //	// Only executes nodes needed by "api"
 //	engine.Run(ctx)
 type Builder struct {
-	catalog map[string]node
+	catalog map[ID]node
 }
 
 // NewBuilder creates a builder from a node catalog.
@@ -32,7 +32,7 @@ type Builder struct {
 //
 //	// Use global registry
 //	builder := graft.NewBuilder(graft.Registry())
-func NewBuilder(catalog map[string]node) *Builder {
+func NewBuilder(catalog map[ID]node) *Builder {
 	return &Builder{catalog: catalog}
 }
 
@@ -51,12 +51,12 @@ func NewBuilder(catalog map[string]node) *Builder {
 //
 //	// Multiple targets
 //	engine, err := builder.BuildFor("api", "worker", "scheduler")
-func (b *Builder) BuildFor(targetNodeIDs ...string) (*Engine, error) {
-	needed := make(map[string]node)
+func (b *Builder) BuildFor(targetNodeIDs ...ID) (*Engine, error) {
+	needed := make(map[ID]node)
 
 	// Recursive resolver with memoization
-	var resolve func(id string) error
-	resolve = func(id string) error {
+	var resolve func(id ID) error
+	resolve = func(id ID) error {
 		// Already resolved
 		if _, already := needed[id]; already {
 			return nil

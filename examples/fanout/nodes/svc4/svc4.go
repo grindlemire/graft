@@ -9,7 +9,7 @@ import (
 	"github.com/grindlemire/graft/examples/fanout/nodes/config"
 )
 
-const ID = "svc4"
+const ID graft.ID = "svc4"
 
 type Output struct {
 	Name   string
@@ -19,7 +19,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{config.ID},
+		DependsOn: []graft.ID{config.ID},
 		Run:       run,
 	})
 }

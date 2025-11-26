@@ -4,7 +4,7 @@ import "context"
 
 // registry holds all registered nodes in type-erased form.
 // It is populated at init time by calls to Register.
-var registry = make(map[string]node)
+var registry = make(map[ID]node)
 
 // Register adds a typed node to the global registry.
 //
@@ -43,7 +43,7 @@ var registry = make(map[string]node)
 //	import _ "myapp/nodes/config"
 func Register[T any](n Node[T]) {
 	if _, exists := registry[n.ID]; exists {
-		panic("graft: duplicate node registration: " + n.ID)
+		panic("graft: duplicate node registration: " + string(n.ID))
 	}
 
 	// Type erasure: convert typed Node[T] to internal node with any
@@ -67,8 +67,8 @@ func Register[T any](n Node[T]) {
 //	fmt.Printf("Registered %d nodes\n", len(nodes))
 //
 //	builder := graft.NewBuilder(graft.Registry())
-func Registry() map[string]node {
-	cp := make(map[string]node, len(registry))
+func Registry() map[ID]node {
+	cp := make(map[ID]node, len(registry))
 	for k, v := range registry {
 		cp[k] = v
 	}

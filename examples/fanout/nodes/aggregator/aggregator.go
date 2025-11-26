@@ -13,7 +13,7 @@ import (
 	"github.com/grindlemire/graft/examples/fanout/nodes/svc5"
 )
 
-const ID = "aggregator"
+const ID graft.ID = "aggregator"
 
 type Output struct {
 	TotalServices int
@@ -24,7 +24,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{svc1.ID, svc2.ID, svc3.ID, svc4.ID, svc5.ID},
+		DependsOn: []graft.ID{svc1.ID, svc2.ID, svc3.ID, svc4.ID, svc5.ID},
 		Run:       run,
 	})
 }

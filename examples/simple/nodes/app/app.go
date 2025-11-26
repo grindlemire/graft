@@ -9,7 +9,7 @@ import (
 	"github.com/grindlemire/graft/examples/simple/nodes/db"
 )
 
-const ID = "app"
+const ID graft.ID = "app"
 
 type Output struct {
 	AppName string
@@ -19,7 +19,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{db.ID},
+		DependsOn: []graft.ID{db.ID},
 		Run:       run,
 	})
 }

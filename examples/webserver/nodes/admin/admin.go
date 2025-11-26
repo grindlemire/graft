@@ -9,7 +9,7 @@ import (
 	"github.com/grindlemire/graft/examples/webserver/nodes/metrics"
 )
 
-const ID = "admin"
+const ID graft.ID = "admin"
 
 type Output struct {
 	TotalRequests int
@@ -20,7 +20,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{metrics.ID},
+		DependsOn: []graft.ID{metrics.ID},
 		Run:       run,
 	})
 }

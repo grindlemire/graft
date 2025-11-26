@@ -7,23 +7,23 @@ import (
 
 func TestNewBuilder(t *testing.T) {
 	type tc struct {
-		catalog   map[string]node
+		catalog   map[ID]node
 		wantCount int
 	}
 
 	tests := map[string]tc{
 		"empty catalog": {
-			catalog:   map[string]node{},
+			catalog:   map[ID]node{},
 			wantCount: 0,
 		},
 		"single node catalog": {
-			catalog: map[string]node{
+			catalog: map[ID]node{
 				"a": makeNode("a", nil, nil),
 			},
 			wantCount: 1,
 		},
 		"multiple node catalog": {
-			catalog: map[string]node{
+			catalog: map[ID]node{
 				"a": makeNode("a", nil, nil),
 				"b": makeNode("b", nil, nil),
 				"c": makeNode("c", nil, nil),
@@ -47,75 +47,75 @@ func TestNewBuilder(t *testing.T) {
 
 func TestBuilderBuildFor(t *testing.T) {
 	type tc struct {
-		catalog      map[string]node
-		targets      []string
-		wantNodes    []string
+		catalog      map[ID]node
+		targets      []ID
+		wantNodes    []ID
 		wantErr      bool
 		errSubstr    string
 		verifyResult func(t *testing.T, e *Engine)
 	}
 
-	baseCatalog := map[string]node{
+	baseCatalog := map[ID]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return "a", nil }),
-		"b": makeNode("b", []string{"a"}, func(ctx context.Context) (any, error) { return "b", nil }),
-		"c": makeNode("c", []string{"a"}, func(ctx context.Context) (any, error) { return "c", nil }),
-		"d": makeNode("d", []string{"b", "c"}, func(ctx context.Context) (any, error) { return "d", nil }),
+		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) { return "b", nil }),
+		"c": makeNode("c", []ID{"a"}, func(ctx context.Context) (any, error) { return "c", nil }),
+		"d": makeNode("d", []ID{"b", "c"}, func(ctx context.Context) (any, error) { return "d", nil }),
 		"e": makeNode("e", nil, func(ctx context.Context) (any, error) { return "e", nil }),
 	}
 
 	tests := map[string]tc{
 		"single target no deps": {
 			catalog:   baseCatalog,
-			targets:   []string{"a"},
-			wantNodes: []string{"a"},
+			targets:   []ID{"a"},
+			wantNodes: []ID{"a"},
 			wantErr:   false,
 		},
 		"single target with one dep": {
 			catalog:   baseCatalog,
-			targets:   []string{"b"},
-			wantNodes: []string{"a", "b"},
+			targets:   []ID{"b"},
+			wantNodes: []ID{"a", "b"},
 			wantErr:   false,
 		},
 		"single target with transitive deps": {
 			catalog:   baseCatalog,
-			targets:   []string{"d"},
-			wantNodes: []string{"a", "b", "c", "d"},
+			targets:   []ID{"d"},
+			wantNodes: []ID{"a", "b", "c", "d"},
 			wantErr:   false,
 		},
 		"multiple targets": {
 			catalog:   baseCatalog,
-			targets:   []string{"b", "c"},
-			wantNodes: []string{"a", "b", "c"},
+			targets:   []ID{"b", "c"},
+			wantNodes: []ID{"a", "b", "c"},
 			wantErr:   false,
 		},
 		"multiple targets with overlap": {
 			catalog:   baseCatalog,
-			targets:   []string{"d", "e"},
-			wantNodes: []string{"a", "b", "c", "d", "e"},
+			targets:   []ID{"d", "e"},
+			wantNodes: []ID{"a", "b", "c", "d", "e"},
 			wantErr:   false,
 		},
 		"unknown target": {
 			catalog:   baseCatalog,
-			targets:   []string{"unknown"},
+			targets:   []ID{"unknown"},
 			wantErr:   true,
 			errSubstr: "unknown node: unknown",
 		},
 		"mixed known and unknown targets": {
 			catalog:   baseCatalog,
-			targets:   []string{"a", "unknown"},
+			targets:   []ID{"a", "unknown"},
 			wantErr:   true,
 			errSubstr: "unknown node: unknown",
 		},
 		"empty targets": {
 			catalog:   baseCatalog,
-			targets:   []string{},
-			wantNodes: []string{},
+			targets:   []ID{},
+			wantNodes: []ID{},
 			wantErr:   false,
 		},
 		"duplicate targets": {
 			catalog:   baseCatalog,
-			targets:   []string{"a", "a", "a"},
-			wantNodes: []string{"a"},
+			targets:   []ID{"a", "a", "a"},
+			wantNodes: []ID{"a"},
 			wantErr:   false,
 		},
 	}
@@ -164,34 +164,34 @@ func TestBuilderBuildFor(t *testing.T) {
 func TestBuilderBuildForExecution(t *testing.T) {
 	// Test that built engines actually execute correctly
 	type tc struct {
-		catalog     map[string]node
-		targets     []string
-		wantResults map[string]any
+		catalog     map[ID]node
+		targets     []ID
+		wantResults map[ID]any
 	}
 
 	tests := map[string]tc{
 		"execute linear chain": {
-			catalog: map[string]node{
+			catalog: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 1, nil }),
-				"b": makeNode("b", []string{"a"}, func(ctx context.Context) (any, error) {
+				"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
 					v, _ := Dep[int](ctx, "a")
 					return v * 2, nil
 				}),
-				"c": makeNode("c", []string{"b"}, func(ctx context.Context) (any, error) {
+				"c": makeNode("c", []ID{"b"}, func(ctx context.Context) (any, error) {
 					v, _ := Dep[int](ctx, "b")
 					return v * 2, nil
 				}),
 			},
-			targets:     []string{"c"},
-			wantResults: map[string]any{"a": 1, "b": 2, "c": 4},
+			targets:     []ID{"c"},
+			wantResults: map[ID]any{"a": 1, "b": 2, "c": 4},
 		},
 		"execute subset of catalog": {
-			catalog: map[string]node{
+			catalog: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return "included", nil }),
 				"b": makeNode("b", nil, func(ctx context.Context) (any, error) { return "excluded", nil }),
 			},
-			targets:     []string{"a"},
-			wantResults: map[string]any{"a": "included"},
+			targets:     []ID{"a"},
+			wantResults: map[ID]any{"a": "included"},
 		},
 	}
 
@@ -227,9 +227,9 @@ func TestBuilderBuildForExecution(t *testing.T) {
 }
 
 func TestBuilderDoesNotMutateCatalog(t *testing.T) {
-	catalog := map[string]node{
+	catalog := map[ID]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 1, nil }),
-		"b": makeNode("b", []string{"a"}, func(ctx context.Context) (any, error) { return 2, nil }),
+		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) { return 2, nil }),
 	}
 
 	originalLen := len(catalog)

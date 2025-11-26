@@ -9,7 +9,7 @@ import (
 	"github.com/grindlemire/graft/examples/webserver/nodes/config"
 )
 
-const ID = "metrics"
+const ID graft.ID = "metrics"
 
 type Output struct {
 	Connected    bool
@@ -20,7 +20,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{config.ID},
+		DependsOn: []graft.ID{config.ID},
 		Run:       run,
 	})
 }

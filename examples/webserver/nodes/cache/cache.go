@@ -9,7 +9,7 @@ import (
 	"github.com/grindlemire/graft/examples/webserver/nodes/config"
 )
 
-const ID = "cache"
+const ID graft.ID = "cache"
 
 type Output struct {
 	Connected bool
@@ -19,7 +19,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{config.ID},
+		DependsOn: []graft.ID{config.ID},
 		Run:       run,
 	})
 }

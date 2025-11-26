@@ -10,7 +10,7 @@ import (
 	"github.com/grindlemire/graft/examples/webserver/nodes/db"
 )
 
-const ID = "user"
+const ID graft.ID = "user"
 
 type Output struct {
 	UserID   string
@@ -26,7 +26,7 @@ type RequestContext struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{db.ID, cache.ID},
+		DependsOn: []graft.ID{db.ID, cache.ID},
 		Run:       run,
 	})
 }

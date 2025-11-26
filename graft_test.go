@@ -8,7 +8,7 @@ import (
 func TestDep(t *testing.T) {
 	type tc struct {
 		ctx       context.Context
-		nodeID    string
+		nodeID    ID
 		wantVal   string
 		wantErr   bool
 		errSubstr string
@@ -78,7 +78,7 @@ func TestDepGenericTypes(t *testing.T) {
 
 	type tc struct {
 		results   results
-		nodeID    string
+		nodeID    ID
 		checkFunc func(t *testing.T, got any)
 	}
 

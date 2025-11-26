@@ -75,6 +75,8 @@ type contextKey struct{}
 // resultsKey is the context key for storing dependency results.
 var resultsKey = contextKey{}
 
+type ID string
+
 // Node represents a single node in the dependency graph with a typed output.
 //
 // The type parameter T specifies the output type of the Run function,
@@ -95,12 +97,12 @@ var resultsKey = contextKey{}
 type Node[T any] struct {
 	// ID is the unique identifier for this node.
 	// This is used to reference the node in DependsOn lists and Dep calls.
-	ID string
+	ID ID
 
 	// DependsOn lists the IDs of nodes that must complete before this node runs.
 	// The engine ensures all dependencies have completed and their outputs
 	// are available via Dep before calling Run.
-	DependsOn []string
+	DependsOn []ID
 
 	// Run executes the node's business logic and returns a typed output.
 	// Dependencies are accessed via Dep[T](ctx, nodeID).
@@ -110,13 +112,13 @@ type Node[T any] struct {
 // node is the internal type-erased representation used for storage.
 // Type erasure happens at registration time, allowing heterogeneous storage.
 type node struct {
-	id        string
-	dependsOn []string
+	id        ID
+	dependsOn []ID
 	run       func(ctx context.Context) (any, error)
 }
 
 // results is the internal type for storing node outputs in context.
-type results map[string]any
+type results map[ID]any
 
 // withResults adds results to a context for downstream node access.
 func withResults(ctx context.Context, r results) context.Context {
@@ -148,7 +150,7 @@ func getResults(ctx context.Context) (results, bool) {
 //	    }
 //	    // use cfg...
 //	}
-func Dep[T any](ctx context.Context, nodeID string) (T, error) {
+func Dep[T any](ctx context.Context, nodeID ID) (T, error) {
 	var zero T
 
 	r, ok := getResults(ctx)

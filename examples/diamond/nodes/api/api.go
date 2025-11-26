@@ -10,7 +10,7 @@ import (
 	"github.com/grindlemire/graft/examples/diamond/nodes/db"
 )
 
-const ID = "api"
+const ID graft.ID = "api"
 
 type Output struct {
 	Ready   bool
@@ -20,7 +20,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []string{db.ID, cache.ID}, // depends on both
+		DependsOn: []graft.ID{db.ID, cache.ID}, // depends on both
 		Run:       run,
 	})
 }
