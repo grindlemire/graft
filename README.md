@@ -2,6 +2,15 @@
 
 A graph-based dependency execution framework for Go. Nodes declare their dependencies explicitly, and the engine executes them in topological order with automatic parallelization.
 
+## Features
+
+- **Type-safe nodes** — Generic `Node[T]` ensures compile-time type checking on return values
+- **Declarative dependencies** — Nodes specify what they depend on, not how to get it
+- **Automatic parallelization** — Nodes at the same level run concurrently
+- **Type-safe dependency access** — Generic `Dep[T]` function with compile-time type checking
+- **Subgraph execution** — Build engines for specific targets with automatic transitive dependency resolution
+- **Static analysis** — Validate dependency declarations match actual usage at test time
+
 ## Install
 
 ```bash
@@ -12,7 +21,7 @@ go get github.com/grindlemire/graft
 
 ### Define Nodes
 
-Each node is typically its own package with an `init()` function that registers it:
+Each node is typically its own package with an `init()` function that registers it. The `Node[T]` type parameter specifies the output type:
 
 ```go
 // nodes/config/config.go
@@ -31,16 +40,19 @@ type Output struct {
 }
 
 func init() {
-    graft.Register(graft.Node{
+    graft.Register(graft.Node[Output]{
         ID:        ID,
         DependsOn: []string{}, // root node
-        Run: func(ctx context.Context) (any, error) {
-            return Output{
-                DBHost: "localhost",
-                Port:   5432,
-            }, nil
-        },
+        Run:       run,
     })
+}
+
+// Compiler enforces this returns Output
+func run(ctx context.Context) (Output, error) {
+    return Output{
+        DBHost: "localhost",
+        Port:   5432,
+    }, nil
 }
 ```
 
@@ -63,23 +75,26 @@ type Output struct {
 }
 
 func init() {
-    graft.Register(graft.Node{
+    graft.Register(graft.Node[Output]{
         ID:        ID,
         DependsOn: []string{config.ID},
-        Run: func(ctx context.Context) (any, error) {
-            cfg, err := graft.Dep[config.Output](ctx, config.ID)
-            if err != nil {
-                return nil, err
-            }
-            
-            pool, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%d", cfg.DBHost, cfg.Port))
-            if err != nil {
-                return nil, err
-            }
-            
-            return Output{Pool: pool}, nil
-        },
+        Run:       run,
     })
+}
+
+// Compiler enforces this returns Output
+func run(ctx context.Context) (Output, error) {
+    cfg, err := graft.Dep[config.Output](ctx, config.ID)
+    if err != nil {
+        return Output{}, err
+    }
+    
+    pool, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%d", cfg.DBHost, cfg.Port))
+    if err != nil {
+        return Output{}, err
+    }
+    
+    return Output{Pool: pool}, nil
 }
 ```
 
@@ -131,56 +146,65 @@ if err := engine.Run(ctx); err != nil {
 }
 ```
 
-## API Reference
+## Dependency Validation
 
-### Core Types
+Graft includes static analysis tools to verify that your dependency declarations are correct at test time. This catches common errors like:
+
+- Using `Dep[T](ctx, "x")` without declaring `"x"` in `DependsOn`
+- Declaring a dependency in `DependsOn` that is never used
+
+### Quick Setup
+
+Add a single test to validate all nodes in your project:
 
 ```go
-// Node represents a unit of work in the dependency graph.
-type Node struct {
-    ID        string
-    DependsOn []string
-    Run       func(ctx context.Context) (any, error)
+// nodes/deps_test.go
+package nodes_test
+
+import (
+    "testing"
+    "github.com/grindlemire/graft"
+)
+
+func TestNodeDependencies(t *testing.T) {
+    graft.AssertDepsValid(t, "./")
+}
+```
+
+### Example Output
+
+When validation fails, you get detailed error messages:
+
+```text
+=== RUN   TestNodeDependencies
+    deps_test.go:10: graft.AssertDepsValid: db (nodes/db/db.go): undeclared deps: [cache]
+    deps_test.go:10:   → node "db" uses Dep[T](ctx, "cache") but does not declare it in DependsOn
+--- FAIL: TestNodeDependencies (0.01s)
+```
+
+### Programmatic Access
+
+For custom validation logic or CI integration:
+
+```go
+// Check without failing
+results, err := graft.CheckDepsValid("./nodes")
+if err != nil {
+    log.Fatal(err)
 }
 
-// Dep retrieves a dependency's output from context with type assertion.
-func Dep[T any](ctx context.Context, nodeID string) (T, error)
-```
+for _, r := range results {
+    if r.HasIssues() {
+        fmt.Printf("Node %s has issues:\n", r.NodeID)
+        fmt.Printf("  Undeclared: %v\n", r.Undeclared)
+        fmt.Printf("  Unused: %v\n", r.Unused)
+    }
+}
 
-### Registration
-
-```go
-// Register adds a node to the global registry (call from init).
-func Register(node Node)
-
-// Registry returns all registered nodes.
-func Registry() map[string]Node
-```
-
-### Engine
-
-```go
-// New creates an engine from a map of nodes.
-func New(nodes map[string]Node) *Engine
-
-// Build creates an engine using all registered nodes.
-func Build() *Engine
-
-// Run executes nodes in topological order with parallel execution.
-func (e *Engine) Run(ctx context.Context) error
-
-// Results returns all node outputs after execution.
-func (e *Engine) Results() map[string]any
-```
-
-### Builder
-
-```go
-// NewBuilder creates a builder for subgraph extraction.
-func NewBuilder(catalog map[string]Node) *Builder
-
-// BuildFor creates an engine with target nodes and their transitive deps.
-func (b *Builder) BuildFor(targetNodeIDs ...string) (*Engine, error)
+// Or use ValidateDeps for a simple pass/fail
+if err := graft.ValidateDeps("./nodes"); err != nil {
+    log.Fatal(err)
+}
 ```
 
 ## License

@@ -1,6 +1,66 @@
 // Package graft provides a graph-based dependency execution framework.
-// Nodes declare their dependencies explicitly, and the engine executes them
-// in topological order with automatic parallelization.
+//
+// Graft allows you to define nodes that declare their dependencies explicitly,
+// and the engine executes them in topological order with automatic parallelization.
+// Nodes at the same level (no interdependencies) run concurrently.
+//
+// # Quick Start
+//
+// Define nodes with typed Run functions:
+//
+//	graft.Register(graft.Node[Config]{
+//	    ID:        "config",
+//	    DependsOn: []string{},
+//	    Run: func(ctx context.Context) (Config, error) {
+//	        return Config{Host: "localhost"}, nil
+//	    },
+//	})
+//
+//	graft.Register(graft.Node[*sql.DB]{
+//	    ID:        "db",
+//	    DependsOn: []string{"config"},
+//	    Run: func(ctx context.Context) (*sql.DB, error) {
+//	        cfg, err := graft.Dep[Config](ctx, "config")
+//	        if err != nil {
+//	            return nil, err
+//	        }
+//	        return connectDB(cfg), nil
+//	    },
+//	})
+//
+// Build and run the graph:
+//
+//	engine := graft.Build()
+//	if err := engine.Run(ctx); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// # Type Safety
+//
+// The generic Node[T] type ensures compile-time type checking on Run return values.
+// The type parameter T specifies what the node produces.
+//
+// # Dependency Access
+//
+// Use [Dep] to retrieve dependency outputs with type safety:
+//
+//	cfg, err := graft.Dep[ConfigOutput](ctx, "config")
+//
+// # Subgraph Execution
+//
+// Use [Builder] to execute only specific nodes and their transitive dependencies:
+//
+//	builder := graft.NewBuilder(graft.Registry())
+//	engine, _ := builder.BuildFor("api")
+//	engine.Run(ctx)
+//
+// # Static Analysis
+//
+// Use [AssertDepsValid] in tests to verify dependency declarations:
+//
+//	func TestDeps(t *testing.T) {
+//	    graft.AssertDepsValid(t, ".")
+//	}
 package graft
 
 import (
@@ -9,29 +69,56 @@ import (
 )
 
 // contextKey is the type for context keys used by graft.
+// Using an unexported struct type ensures no collisions with other packages.
 type contextKey struct{}
 
 // resultsKey is the context key for storing dependency results.
 var resultsKey = contextKey{}
 
-// RunFunc is the signature for a node's execution function.
-// Dependencies are accessed via the Dep[T] helper using the context.
-type RunFunc func(ctx context.Context) (any, error)
-
-// Node represents a single node in the dependency graph.
-type Node struct {
+// Node represents a single node in the dependency graph with a typed output.
+//
+// The type parameter T specifies the output type of the Run function,
+// providing compile-time type safety. Each node has a unique ID, declares
+// its dependencies, and provides a Run function that executes its business logic.
+//
+// Example:
+//
+//	graft.Node[MyOutput]{
+//	    ID:        "mynode",
+//	    DependsOn: []string{"config", "db"},
+//	    Run: func(ctx context.Context) (MyOutput, error) {
+//	        cfg, _ := graft.Dep[Config](ctx, "config")
+//	        db, _ := graft.Dep[*sql.DB](ctx, "db")
+//	        return doWork(cfg, db), nil
+//	    },
+//	}
+type Node[T any] struct {
 	// ID is the unique identifier for this node.
+	// This is used to reference the node in DependsOn lists and Dep calls.
 	ID string
+
 	// DependsOn lists the IDs of nodes that must complete before this node runs.
+	// The engine ensures all dependencies have completed and their outputs
+	// are available via Dep before calling Run.
 	DependsOn []string
-	// Run executes the node's business logic.
-	Run RunFunc
+
+	// Run executes the node's business logic and returns a typed output.
+	// Dependencies are accessed via Dep[T](ctx, nodeID).
+	Run func(ctx context.Context) (T, error)
+}
+
+// node is the internal type-erased representation used for storage.
+// Type erasure happens at registration time, allowing heterogeneous storage.
+type node struct {
+	id        string
+	dependsOn []string
+	run       func(ctx context.Context) (any, error)
 }
 
 // results is the internal type for storing node outputs in context.
 type results map[string]any
 
-// withResults adds results to a context.
+// withResults adds results to a context for downstream node access.
 func withResults(ctx context.Context, r results) context.Context {
 	return context.WithValue(ctx, resultsKey, r)
 }
@@ -43,7 +130,24 @@ func getResults(ctx context.Context) (results, bool) {
 }
 
 // Dep retrieves a dependency's output from the context with type assertion.
-// Returns an error if the dependency is not found or has the wrong type.
+//
+// This is the primary way for nodes to access their dependencies' outputs.
+// The type parameter T specifies the expected output type.
+//
+// Returns an error if:
+//   - The context has no results (called outside of a node's Run function)
+//   - The dependency nodeID is not found (not declared in DependsOn)
+//   - The dependency's output cannot be asserted to type T
+//
+// Example:
+//
+//	func(ctx context.Context) (MyOutput, error) {
+//	    cfg, err := graft.Dep[config.Output](ctx, "config")
+//	    if err != nil {
+//	        return MyOutput{}, err
+//	    }
+//	    // use cfg...
+//	}
 func Dep[T any](ctx context.Context, nodeID string) (T, error) {
 	var zero T
 
@@ -64,4 +168,3 @@ func Dep[T any](ctx context.Context, nodeID string) (T, error) {
 
 	return typed, nil
 }
-
