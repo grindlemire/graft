@@ -5,16 +5,13 @@ Demonstrates using graft to build per-request dependency graphs in an HTTP serve
 ## Dependency Tree (Full Catalog)
 
 ```
-          config
-         /   |   \
+          config                health
+         /   |   \            (standalone)
         ▼    ▼    ▼
        db  cache  metrics
         \   /       |
          ▼ ▼        ▼
-         user     admin
-           \       /
-            ▼     ▼
-            health
+        user      admin
 ```
 
 ## Endpoints and Their Subgraphs
