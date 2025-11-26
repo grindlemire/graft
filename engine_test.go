@@ -226,33 +226,43 @@ func TestEngineRunContextCancellation(t *testing.T) {
 func TestEngineRunContextCancelledBetweenLevels(t *testing.T) {
 	// Test that context cancellation is checked between levels
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	level1Done := make(chan struct{})
+	cancelComplete := make(chan struct{})
 
 	nodes := map[string]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) {
 			close(level1Done)
+			// Wait for cancel to complete before returning, ensuring the context
+			// is cancelled before runLevel returns and the loop checks ctx.Err()
+			<-cancelComplete
 			return "a", nil
 		}),
 		"b": makeNode("b", []string{"a"}, func(ctx context.Context) (any, error) {
 			// This should not run if context is cancelled between levels
+			t.Error("node b should not have run - context was cancelled between levels")
 			return "b", nil
 		}),
 	}
 
 	e := New(nodes)
 
-	// Cancel after first level completes but before second level starts
+	// Cancel after first level signals but before node "a" returns
 	go func() {
 		<-level1Done
 		cancel()
+		close(cancelComplete)
 	}()
 
 	err := e.Run(ctx)
 
-	// Should get a context error since we cancelled between levels
+	// Must get a context error since we cancelled between levels
 	if err == nil {
-		t.Log("Note: context cancellation between levels is timing-dependent; node b may have started before cancel")
+		t.Fatal("expected context cancellation error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled error, got: %v", err)
 	}
 }
 
