@@ -4,7 +4,7 @@ A minimal example demonstrating the basic graft pattern with a linear dependency
 
 ## Dependency Tree
 
-```
+```bash
 config
    │
    ▼
@@ -32,7 +32,7 @@ go run .
 
 ## Expected Output
 
-```
+```bash
 [config] Loading configuration...
 [config] Done
 [db] Connecting to database at localhost:5432...
@@ -47,4 +47,3 @@ db: {Connected:true PoolSize:10}
 ```
 
 Nodes execute in order: config → db → app, since each depends on the previous.
-

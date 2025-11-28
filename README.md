@@ -3,6 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/grindlemire/graft.svg)](https://pkg.go.dev/github.com/grindlemire/graft)
 [![Go Report Card](https://goreportcard.com/badge/github.com/grindlemire/graft)](https://goreportcard.com/report/github.com/grindlemire/graft)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Examples](https://img.shields.io/badge/Examples-📂-green.svg)](./examples)
 
 Graph-based dependency execution for Go. Nodes declare dependencies explicitly; the engine executes them in topological order with automatic parallelization.
 
