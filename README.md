@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="graft" width="300">
+  <img src="logo.png" alt="graft" width="600">
 </p>
 
 <p align="center">
