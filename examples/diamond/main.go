@@ -9,6 +9,7 @@ import (
 	"github.com/grindlemire/graft"
 
 	// Import nodes for side-effect registration
+	"github.com/grindlemire/graft/examples/diamond/nodes/api"
 	_ "github.com/grindlemire/graft/examples/diamond/nodes/api"
 	_ "github.com/grindlemire/graft/examples/diamond/nodes/cache"
 	_ "github.com/grindlemire/graft/examples/diamond/nodes/config"
@@ -16,18 +17,15 @@ import (
 )
 
 func main() {
-	engine := graft.Build()
-
 	start := time.Now()
-	if err := engine.Run(context.Background()); err != nil {
+	// We can also use ExecuteFor to calculate the results for a specific
+	// subgraph. In this case the subgraph is the entire graph.
+	apiOutput, _, err := graft.ExecuteFor[api.Output](context.Background())
+	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Printf("%s: %+v\n", api.ID, apiOutput)
 	elapsed := time.Since(start)
-
-	fmt.Println("\n=== Results ===")
-	for id, result := range engine.Results() {
-		fmt.Printf("%s: %+v\n", id, result)
-	}
 
 	fmt.Printf("\n=== Timing ===\n")
 	fmt.Printf("Total execution time: %v\n", elapsed)

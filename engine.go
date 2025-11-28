@@ -6,39 +6,107 @@ import (
 	"sync"
 )
 
-// Engine manages the dependency graph and orchestrates execution.
-//
-// The engine holds a set of nodes and executes them in topological order,
-// running nodes at the same level concurrently. Use [New] to create an
-// engine from a custom node map, or [Build] to create one from the
-// global registry.
-//
-// The engine is safe for concurrent use after creation, but Run should
-// only be called once per engine instance.
-type Engine struct {
-	nodes   map[ID]node
-	results results
-	mu      sync.RWMutex
+// Option configures execution behavior.
+type Option func(*config)
+
+type config struct {
+	registry       map[ID]node
+	cache          Cache       // optional cache for node outputs
+	ignoreCacheFor map[ID]bool // nodes to skip cache lookup
 }
 
-// New creates an engine from a map of nodes.
+// WithRegistry uses a custom node registry instead of the global registry.
 //
-// The nodes map keys should match the node id values. This function
-// does not validate the dependency graph; validation occurs during Run.
+// Example:
 //
-// For most use cases, prefer [Build] which uses the global registry,
-// or [Builder.BuildFor] for subgraph execution.
-func New(nodes map[ID]node) *Engine {
-	return &Engine{
-		nodes:   nodes,
-		results: make(results),
+//	results, err := graft.Execute(ctx, graft.WithRegistry(customNodes))
+func WithRegistry(registry map[ID]node) Option {
+	return func(c *config) {
+		c.registry = registry
 	}
 }
 
-// Build creates an engine using all nodes from the global registry.
+// MergeRegistry merges the provided registry with the global registry.
+// On conflicts, the provided registry takes precedence.
 //
-// This is the most common way to create an engine. It uses all nodes
-// that have been registered via [Register], typically from init() functions.
+// This is useful for testing where you want to override specific nodes
+// while keeping the rest of the registered graph.
+//
+// Example:
+//
+//	// Override just the "db" node for testing
+//	results, err := graft.Execute(ctx, graft.MergeRegistry(mockNodes))
+func MergeRegistry(registry map[ID]node) Option {
+	return func(c *config) {
+		merged := Registry()
+		for id, n := range registry {
+			merged[id] = n
+		}
+		c.registry = merged
+	}
+}
+
+// WithCache overrides the default global cache with a custom cache.
+//
+// By default, Execute/ExecuteFor use a global in-memory cache (similar to
+// the global registry), so caching works automatically across calls.
+// Use WithCache to provide a custom cache implementation (e.g., Redis)
+// or an isolated cache for testing.
+//
+// Example:
+//
+//	// Use a custom cache instead of the global default
+//	customCache := graft.NewMemoryCache()
+//	results, _ := graft.Execute(ctx, graft.WithCache(customCache))
+func WithCache(cache Cache) Option {
+	return func(c *config) {
+		c.cache = cache
+	}
+}
+
+// IgnoreCache forces re-execution of the specified cacheable nodes,
+// bypassing any cached values. The fresh results are still written
+// back to the cache.
+//
+// This is useful for invalidating specific nodes without clearing the
+// entire cache (e.g., to refresh config after a change).
+//
+// Example:
+//
+//	// Re-fetch config even though it's cacheable
+//	results, err := graft.Execute(ctx,
+//	    graft.WithCache(cache),
+//	    graft.IgnoreCache("config"),
+//	)
+func IgnoreCache(ids ...ID) Option {
+	return func(cfg *config) {
+		if cfg.ignoreCacheFor == nil {
+			cfg.ignoreCacheFor = make(map[ID]bool)
+		}
+		for _, id := range ids {
+			cfg.ignoreCacheFor[id] = true
+		}
+	}
+}
+
+// DisableCache disables the use of the default global cache.
+//
+// Example:
+//
+//	// Disable the use of the default global cache
+//	results, err := graft.Execute(ctx, graft.DisableCache())
+func DisableCache() Option {
+	return func(cfg *config) {
+		cfg.cache = nil
+	}
+}
+
+// Execute runs all registered nodes and returns their results.
+//
+// Nodes are executed in topological order with automatic parallelization.
+// Nodes at the same dependency level run concurrently.
+//
+// By default, uses the global registry. Use [WithRegistry] for a custom registry.
 //
 // Example:
 //
@@ -48,37 +116,135 @@ func New(nodes map[ID]node) *Engine {
 //	)
 //
 //	func main() {
-//	    engine := graft.Build()
-//	    engine.Run(context.Background())
+//	    results, err := graft.Execute(ctx)
+//	    if err != nil {
+//	        log.Fatal(err)
+//	    }
+//	    db := results["db"].(*sql.DB)
 //	}
-func Build() *Engine {
-	return New(Registry())
+func Execute(ctx context.Context, opts ...Option) (map[ID]any, error) {
+	cfg := &config{registry: Registry(), cache: defaultCache}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	engine := newEngine(cfg.registry, cfg)
+	if err := engine.run(ctx); err != nil {
+		return nil, err
+	}
+	return engine.results, nil
 }
 
-// Run executes all nodes in topological order with automatic parallelization.
+// ExecuteFor runs the node that produces type T and its transitive dependencies.
 //
-// Nodes are grouped into levels based on their dependencies. Within each level,
-// all nodes run concurrently. The engine waits for all nodes in a level to
-// complete before starting the next level.
+// The target node is determined by the type parameter T, which must match
+// the output type used when registering the node. Returns the typed result
+// and the full results map for accessing other node outputs if needed.
 //
-// Run respects context cancellation. If the context is cancelled between levels,
-// execution stops and the context error is returned.
+// By default, uses the global registry. Use [WithRegistry] for a custom registry.
 //
-// Returns an error if:
-//   - A cycle is detected in the dependency graph
-//   - A node depends on an unknown node
-//   - Any node's Run function returns an error
-//   - The context is cancelled
+// Returns an error if the type is not registered or execution fails.
 //
 // Example:
 //
-//	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-//	defer cancel()
-//
-//	if err := engine.Run(ctx); err != nil {
-//	    log.Fatal(err)
-//	}
-func (e *Engine) Run(ctx context.Context) error {
+//	appOut, results, err := graft.ExecuteFor[app.Output](ctx)
+//	// appOut is typed as app.Output
+//	// results map available for accessing dependencies:
+//	config, _ := graft.Result[config.Output](results, config.ID)
+func ExecuteFor[T any](ctx context.Context, opts ...Option) (T, results, error) {
+	var zero T
+
+	id, ok := typeToID[(*T)(nil)]
+	if !ok {
+		return zero, nil, fmt.Errorf("graft: type %T not registered as node output", zero)
+	}
+
+	results, err := executeForIDs(ctx, []ID{id}, opts...)
+	if err != nil {
+		return zero, nil, err
+	}
+
+	result, err := Result[T](results, id)
+	if err != nil {
+		return zero, nil, err
+	}
+
+	return result, results, nil
+}
+
+// executeForIDs runs the specified target nodes and their transitive dependencies.
+// This is an internal helper used by ExecuteFor.
+func executeForIDs(ctx context.Context, targets []ID, opts ...Option) (map[ID]any, error) {
+	cfg := &config{registry: Registry(), cache: defaultCache}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	nodes, err := resolveSubgraph(cfg.registry, targets)
+	if err != nil {
+		return nil, err
+	}
+
+	engine := newEngine(nodes, cfg)
+	if err := engine.run(ctx); err != nil {
+		return nil, err
+	}
+	return engine.results, nil
+}
+
+// resolveSubgraph extracts target nodes and their transitive dependencies from a registry.
+func resolveSubgraph(registry map[ID]node, targets []ID) (map[ID]node, error) {
+	needed := make(map[ID]node)
+
+	var resolve func(id ID) error
+	resolve = func(id ID) error {
+		if _, already := needed[id]; already {
+			return nil
+		}
+
+		n, ok := registry[id]
+		if !ok {
+			return fmt.Errorf("unknown node: %s", id)
+		}
+
+		needed[id] = n
+
+		for _, dep := range n.dependsOn {
+			if err := resolve(dep); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for _, id := range targets {
+		if err := resolve(id); err != nil {
+			return nil, err
+		}
+	}
+
+	return needed, nil
+}
+
+// engine manages the dependency graph and orchestrates execution.
+type engine struct {
+	nodes          map[ID]node
+	results        results
+	mu             sync.RWMutex
+	cache          Cache
+	ignoreCacheFor map[ID]bool
+}
+
+func newEngine(nodes map[ID]node, cfg *config) *engine {
+	return &engine{
+		nodes:          nodes,
+		results:        make(results),
+		cache:          cfg.cache,
+		ignoreCacheFor: cfg.ignoreCacheFor,
+	}
+}
+
+func (e *engine) run(ctx context.Context) error {
 	levels, err := e.topoSortLevels()
 	if err != nil {
 		return err
@@ -97,8 +263,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	return nil
 }
 
-// runLevel executes all nodes in a level concurrently.
-func (e *Engine) runLevel(ctx context.Context, level []ID) error {
+func (e *engine) runLevel(ctx context.Context, level []ID) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(level))
 
@@ -108,6 +273,20 @@ func (e *Engine) runLevel(ctx context.Context, level []ID) error {
 			defer wg.Done()
 
 			n := e.nodes[nodeID]
+
+			// Check cache for cacheable nodes (unless explicitly ignored)
+			useCache := e.cache != nil && n.cacheable && !e.ignoreCacheFor[nodeID]
+			if useCache {
+				if val, found, err := e.cache.Get(ctx, nodeID); err != nil {
+					errCh <- fmt.Errorf("node %s: cache get: %w", nodeID, err)
+					return
+				} else if found {
+					e.mu.Lock()
+					e.results[nodeID] = val
+					e.mu.Unlock()
+					return // Cache hit - skip execution
+				}
+			}
 
 			// Build context with current results snapshot
 			e.mu.RLock()
@@ -119,6 +298,14 @@ func (e *Engine) runLevel(ctx context.Context, level []ID) error {
 			if err != nil {
 				errCh <- fmt.Errorf("node %s: %w", nodeID, err)
 				return
+			}
+
+			// Write to cache for cacheable nodes
+			if useCache {
+				if err := e.cache.Set(ctx, nodeID, output); err != nil {
+					errCh <- fmt.Errorf("node %s: cache set: %w", nodeID, err)
+					return
+				}
 			}
 
 			// Store result
@@ -139,9 +326,7 @@ func (e *Engine) runLevel(ctx context.Context, level []ID) error {
 	return nil
 }
 
-// copyResults returns a copy of current results.
-// Caller must hold at least RLock.
-func (e *Engine) copyResults() results {
+func (e *engine) copyResults() results {
 	cp := make(results, len(e.results))
 	for k, v := range e.results {
 		cp[k] = v
@@ -149,41 +334,13 @@ func (e *Engine) copyResults() results {
 	return cp
 }
 
-// Results returns all collected results after execution.
-//
-// The returned map is a copy; modifications do not affect the engine's
-// internal state. Keys are node IDs and values are the outputs returned
-// by each node's Run function.
-//
-// Call this after Run completes to access node outputs.
-//
-// Example:
-//
-//	engine.Run(ctx)
-//	results := engine.Results()
-//	dbPool := results["db"].(*sql.DB)
-func (e *Engine) Results() map[ID]any {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.copyResults()
-}
-
 // topoSortLevels groups nodes into execution levels using Kahn's algorithm.
-//
-// Nodes in the same level have no dependencies on each other and can run
-// in parallel. Each level contains only nodes whose dependencies are all
-// in previous levels.
-//
-// Returns an error if a cycle is detected or if a node depends on an
-// unknown node.
-func (e *Engine) topoSortLevels() ([][]ID, error) {
-	// Build in-degree map (count of dependencies for each node)
+func (e *engine) topoSortLevels() ([][]ID, error) {
 	inDegree := make(map[ID]int)
 	for id := range e.nodes {
 		inDegree[id] = 0
 	}
 
-	// Validate dependencies exist and compute in-degrees
 	for _, n := range e.nodes {
 		for _, dep := range n.dependsOn {
 			if _, exists := e.nodes[dep]; !exists {
@@ -193,7 +350,6 @@ func (e *Engine) topoSortLevels() ([][]ID, error) {
 		inDegree[n.id] = len(n.dependsOn)
 	}
 
-	// Build reverse adjacency list (who depends on me)
 	dependents := make(map[ID][]ID)
 	for _, n := range e.nodes {
 		for _, dep := range n.dependsOn {
@@ -201,7 +357,6 @@ func (e *Engine) topoSortLevels() ([][]ID, error) {
 		}
 	}
 
-	// Find nodes with no dependencies (first level)
 	var currentLevel []ID
 	for id, degree := range inDegree {
 		if degree == 0 {
@@ -209,7 +364,6 @@ func (e *Engine) topoSortLevels() ([][]ID, error) {
 		}
 	}
 
-	// Process level by level
 	var levels [][]ID
 	processed := 0
 

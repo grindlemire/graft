@@ -3,24 +3,21 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/grindlemire/graft.svg)](https://pkg.go.dev/github.com/grindlemire/graft)
 [![Go Report Card](https://goreportcard.com/badge/github.com/grindlemire/graft)](https://goreportcard.com/report/github.com/grindlemire/graft)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Examples](https://img.shields.io/badge/examples-5-blue)](https://github.com/grindlemire/graft/tree/main/examples)
 
-A graph-based dependency execution framework for Go. Nodes declare their dependencies explicitly, and the engine executes them in topological order with automatic parallelization.
+Graph-based dependency execution for Go. Nodes declare dependencies explicitly; the engine executes them in topological order with automatic parallelization.
 
 ## Why?
 
-I don't particularly like dependency injection libraries because the existing frameworks feel too magical. They also rely on runtime tricks like reflection or require code gen. However in large code bases it is useful to specify dependencies as graphs rather than passing arguments everywhere and managing dependency spaghetti.
-
-This library tries to provide a middle ground that has very little magic while ensuring dependencies "just show up" for the packages that depend on them.
+Traditional DI frameworks rely on reflection or code generation. This library provides a simpler approach: nodes register themselves and declare what they depend on. Dependencies "just show up" without magic.
 
 ## Features
 
-- **Type-safe nodes** — Generic `Node[T]` ensures compile-time type checking on return values
-- **Declarative dependencies** — Nodes specify what they depend on, not how to get it
-- **Automatic parallelization** — Nodes at the same level run concurrently
-- **Type-safe dependency access** — Generic `Dep[T]` function with compile-time type checking
-- **Subgraph execution** — Build engines for specific targets with automatic transitive dependency resolution
-- **Static analysis** — Validate dependency declarations match actual usage at test time
+- **Type-safe nodes** — Generic `Node[T]` with compile-time type checking
+- **Declarative dependencies** — Nodes specify what they need, not how to get it
+- **Automatic parallelization** — Independent nodes run concurrently
+- **Subgraph execution** — Run only specific nodes and their transitive dependencies
+- **Node-level caching** — Cache expensive nodes across executions
+- **Static analysis** — Validate dependency declarations at test time
 
 ## Install
 
@@ -32,7 +29,7 @@ go get github.com/grindlemire/graft
 
 ### Define Nodes
 
-Each node is typically its own package with an `init()` function that registers it. The `Node[T]` type parameter specifies the output type:
+Each node is typically its own package with an `init()` that registers it:
 
 ```go
 // nodes/config/config.go
@@ -43,7 +40,7 @@ import (
     "github.com/grindlemire/graft"
 )
 
-const ID = "config"
+const ID graft.ID = "config"
 
 type Output struct {
     DBHost string
@@ -53,21 +50,17 @@ type Output struct {
 func init() {
     graft.Register(graft.Node[Output]{
         ID:        ID,
-        DependsOn: []string{}, // root node
+        DependsOn: []graft.ID{}, // root node
         Run:       run,
     })
 }
 
-// Compiler enforces this returns Output
 func run(ctx context.Context) (Output, error) {
-    return Output{
-        DBHost: "localhost",
-        Port:   5432,
-    }, nil
+    return Output{DBHost: "localhost", Port: 5432}, nil
 }
 ```
 
-Nodes that depend on others use `graft.Dep[T]` to retrieve dependency outputs:
+Nodes access dependencies via `graft.Dep[T]`:
 
 ```go
 // nodes/db/db.go
@@ -79,7 +72,7 @@ import (
     "myapp/nodes/config"
 )
 
-const ID = "db"
+const ID graft.ID = "db"
 
 type Output struct {
     Pool *sql.DB
@@ -88,30 +81,27 @@ type Output struct {
 func init() {
     graft.Register(graft.Node[Output]{
         ID:        ID,
-        DependsOn: []string{config.ID},
+        DependsOn: []graft.ID{config.ID},
         Run:       run,
     })
 }
 
-// Compiler enforces this returns Output
 func run(ctx context.Context) (Output, error) {
     cfg, err := graft.Dep[config.Output](ctx, config.ID)
     if err != nil {
         return Output{}, err
     }
-    
     pool, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%d", cfg.DBHost, cfg.Port))
     if err != nil {
         return Output{}, err
     }
-    
     return Output{Pool: pool}, nil
 }
 ```
 
-### Run the Graph
+### Execute the Graph
 
-Import all node packages (side-effect imports trigger registration), then build and run:
+Import node packages for side-effect registration, then execute:
 
 ```go
 package main
@@ -123,100 +113,75 @@ import (
     "github.com/grindlemire/graft"
     _ "myapp/nodes/config"
     _ "myapp/nodes/db"
-    _ "myapp/nodes/cache"
     _ "myapp/nodes/api"
 )
 
 func main() {
-    engine := graft.Build()
-    
-    if err := engine.Run(context.Background()); err != nil {
+    results, err := graft.Execute(context.Background())
+    if err != nil {
         log.Fatal(err)
     }
-    
-    results := engine.Results()
-    // Use results as needed
+    db := results["db"].(*sql.DB)
+    // use db...
 }
 ```
 
 ### Subgraph Execution
 
-For cases where you only need a subset of nodes (e.g., different HTTP endpoints needing different dependencies):
+Run a specific node and its transitive dependencies with type-safe results:
 
 ```go
-builder := graft.NewBuilder(graft.Registry())
-
-// Only builds "api" and its transitive dependencies
-engine, err := builder.BuildFor("api")
+// Only executes "api" and whatever it depends on
+// Returns typed result directly, plus full results map for accessing dependencies
+api, results, err := graft.ExecuteFor[api.Output](ctx)
 if err != nil {
     log.Fatal(err)
 }
+// api is already typed as api.Output
+// results map available for accessing other node outputs if needed
+config, _ := graft.Result[config.Output](results, config.ID)
+```
 
-if err := engine.Run(ctx); err != nil {
-    log.Fatal(err)
-}
+### Caching
+
+Mark nodes as cacheable to avoid re-execution across calls:
+
+```go
+graft.Register(graft.Node[Output]{
+    ID:        ID,
+    DependsOn: []graft.ID{},
+    Run:       run,
+    Cacheable: true, // output cached after first execution
+})
+```
+
+By default, a global in-memory cache is used. Options for control:
+
+```go
+// Use a custom cache
+results, _ := graft.Execute(ctx, graft.WithCache(myCache))
+
+// Force re-execution of specific nodes
+results, _ := graft.Execute(ctx, graft.IgnoreCache("config"))
+
+// Disable caching entirely
+results, _ := graft.Execute(ctx, graft.DisableCache())
 ```
 
 ## Dependency Validation
 
-Graft includes static analysis tools to verify that your dependency declarations are correct at test time. This catches common errors like:
+Static analysis catches dependency mismatches at test time:
+
+```go
+func TestNodeDependencies(t *testing.T) {
+    graft.AssertDepsValid(t, ".")
+}
+```
+
+Catches:
 
 - Using `Dep[T](ctx, "x")` without declaring `"x"` in `DependsOn`
-- Declaring a dependency in `DependsOn` that is never used
-
-### Quick Setup
-
-Add a single test to validate all nodes in your project:
-
-```go
-// nodes/deps_test.go
-package nodes_test
-
-import (
-    "testing"
-    "github.com/grindlemire/graft"
-)
-
-func TestNodeDependencies(t *testing.T) {
-    graft.AssertDepsValid(t, "./")
-}
-```
-
-### Example Output
-
-When validation fails, you get detailed error messages:
-
-```text
-=== RUN   TestNodeDependencies
-    deps_test.go:10: graft.AssertDepsValid: db (nodes/db/db.go): undeclared deps: [cache]
-    deps_test.go:10:   → node "db" uses Dep[T](ctx, "cache") but does not declare it in DependsOn
---- FAIL: TestNodeDependencies (0.01s)
-```
-
-### Programmatic Access
-
-For custom validation logic or CI integration:
-
-```go
-// Check without failing
-results, err := graft.CheckDepsValid("./nodes")
-if err != nil {
-    log.Fatal(err)
-}
-
-for _, r := range results {
-    if r.HasIssues() {
-        fmt.Printf("Node %s has issues:\n", r.NodeID)
-        fmt.Printf("  Undeclared: %v\n", r.Undeclared)
-        fmt.Printf("  Unused: %v\n", r.Unused)
-    }
-}
-
-// Or use ValidateDeps for a simple pass/fail
-if err := graft.ValidateDeps("./nodes"); err != nil {
-    log.Fatal(err)
-}
-```
+- Declaring a dependency that's never used
 
 ## License
 

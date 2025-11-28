@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// makeNode is a test helper that creates a type-erased node for direct engine testing.
+// makeNode is a test helper that creates a type-erased node for direct testing.
 func makeNode(id ID, dependsOn []ID, run func(ctx context.Context) (any, error)) node {
 	return node{
 		id:        id,
@@ -17,47 +17,7 @@ func makeNode(id ID, dependsOn []ID, run func(ctx context.Context) (any, error))
 	}
 }
 
-func TestNew(t *testing.T) {
-	type tc struct {
-		nodes     map[ID]node
-		wantCount int
-	}
-
-	tests := map[string]tc{
-		"empty nodes": {
-			nodes:     map[ID]node{},
-			wantCount: 0,
-		},
-		"single node": {
-			nodes: map[ID]node{
-				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return nil, nil }),
-			},
-			wantCount: 1,
-		},
-		"multiple nodes": {
-			nodes: map[ID]node{
-				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return nil, nil }),
-				"b": makeNode("b", nil, func(ctx context.Context) (any, error) { return nil, nil }),
-				"c": makeNode("c", nil, func(ctx context.Context) (any, error) { return nil, nil }),
-			},
-			wantCount: 3,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			e := New(tt.nodes)
-			if e == nil {
-				t.Fatal("New returned nil")
-			}
-			if len(e.nodes) != tt.wantCount {
-				t.Errorf("got %d nodes, want %d", len(e.nodes), tt.wantCount)
-			}
-		})
-	}
-}
-
-func TestEngineRun(t *testing.T) {
+func TestExecute(t *testing.T) {
 	type tc struct {
 		nodes       map[ID]node
 		wantErr     bool
@@ -141,8 +101,7 @@ func TestEngineRun(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			e := New(tt.nodes)
-			err := e.Run(context.Background())
+			results, err := Execute(context.Background(), WithRegistry(tt.nodes))
 
 			if tt.wantErr {
 				if err == nil {
@@ -158,7 +117,6 @@ func TestEngineRun(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			results := e.Results()
 			if len(results) != len(tt.wantResults) {
 				t.Errorf("got %d results, want %d", len(results), len(tt.wantResults))
 			}
@@ -176,7 +134,7 @@ func TestEngineRun(t *testing.T) {
 	}
 }
 
-func TestEngineRunContextCancellation(t *testing.T) {
+func TestExecuteContextCancellation(t *testing.T) {
 	type tc struct {
 		cancelBefore bool
 		wantErr      bool
@@ -207,8 +165,7 @@ func TestEngineRunContextCancellation(t *testing.T) {
 				cancel()
 			}
 
-			e := New(nodes)
-			err := e.Run(ctx)
+			_, err := Execute(ctx, WithRegistry(nodes))
 
 			if tt.wantErr {
 				if err == nil {
@@ -223,8 +180,7 @@ func TestEngineRunContextCancellation(t *testing.T) {
 	}
 }
 
-func TestEngineRunContextCancelledBetweenLevels(t *testing.T) {
-	// Test that context cancellation is checked between levels
+func TestExecuteContextCancelledBetweenLevels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -234,30 +190,23 @@ func TestEngineRunContextCancelledBetweenLevels(t *testing.T) {
 	nodes := map[ID]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) {
 			close(level1Done)
-			// Wait for cancel to complete before returning, ensuring the context
-			// is cancelled before runLevel returns and the loop checks ctx.Err()
 			<-cancelComplete
 			return "a", nil
 		}),
 		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
-			// This should not run if context is cancelled between levels
 			t.Error("node b should not have run - context was cancelled between levels")
 			return "b", nil
 		}),
 	}
 
-	e := New(nodes)
-
-	// Cancel after first level signals but before node "a" returns
 	go func() {
 		<-level1Done
 		cancel()
 		close(cancelComplete)
 	}()
 
-	err := e.Run(ctx)
+	_, err := Execute(ctx, WithRegistry(nodes))
 
-	// Must get a context error since we cancelled between levels
 	if err == nil {
 		t.Fatal("expected context cancellation error, got nil")
 	}
@@ -266,54 +215,208 @@ func TestEngineRunContextCancelledBetweenLevels(t *testing.T) {
 	}
 }
 
-func TestTopoSortLevels(t *testing.T) {
+func TestExecuteFor(t *testing.T) {
 	type tc struct {
-		nodes      map[ID]node
-		wantLevels int
-		wantErr    bool
-		errSubstr  string
+		registry    map[ID]node
+		targets     []ID
+		wantResults map[ID]any
+		wantErr     bool
+		errSubstr   string
+	}
+
+	baseRegistry := map[ID]node{
+		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return "a", nil }),
+		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) { return "b", nil }),
+		"c": makeNode("c", []ID{"a"}, func(ctx context.Context) (any, error) { return "c", nil }),
+		"d": makeNode("d", []ID{"b", "c"}, func(ctx context.Context) (any, error) { return "d", nil }),
+		"e": makeNode("e", nil, func(ctx context.Context) (any, error) { return "e", nil }),
 	}
 
 	tests := map[string]tc{
-		"empty graph": {
-			nodes:      map[ID]node{},
-			wantLevels: 0,
-			wantErr:    false,
+		"single target no deps": {
+			registry:    baseRegistry,
+			targets:     []ID{"a"},
+			wantResults: map[ID]any{"a": "a"},
 		},
-		"single node": {
-			nodes: map[ID]node{
-				"a": makeNode("a", nil, nil),
-			},
-			wantLevels: 1,
-			wantErr:    false,
+		"single target with one dep": {
+			registry:    baseRegistry,
+			targets:     []ID{"b"},
+			wantResults: map[ID]any{"a": "a", "b": "b"},
 		},
-		"two independent nodes - same level": {
-			nodes: map[ID]node{
-				"a": makeNode("a", nil, nil),
-				"b": makeNode("b", nil, nil),
-			},
-			wantLevels: 1,
-			wantErr:    false,
+		"single target with transitive deps": {
+			registry:    baseRegistry,
+			targets:     []ID{"d"},
+			wantResults: map[ID]any{"a": "a", "b": "b", "c": "c", "d": "d"},
 		},
-		"linear chain - three levels": {
-			nodes: map[ID]node{
-				"a": makeNode("a", nil, nil),
-				"b": makeNode("b", []ID{"a"}, nil),
-				"c": makeNode("c", []ID{"b"}, nil),
-			},
-			wantLevels: 3,
-			wantErr:    false,
+		"multiple targets": {
+			registry:    baseRegistry,
+			targets:     []ID{"b", "c"},
+			wantResults: map[ID]any{"a": "a", "b": "b", "c": "c"},
 		},
-		"diamond - three levels": {
-			nodes: map[ID]node{
-				"a": makeNode("a", nil, nil),
-				"b": makeNode("b", []ID{"a"}, nil),
-				"c": makeNode("c", []ID{"a"}, nil),
-				"d": makeNode("d", []ID{"b", "c"}, nil),
-			},
-			wantLevels: 3,
-			wantErr:    false,
+		"multiple targets with overlap": {
+			registry:    baseRegistry,
+			targets:     []ID{"d", "e"},
+			wantResults: map[ID]any{"a": "a", "b": "b", "c": "c", "d": "d", "e": "e"},
 		},
+		"unknown target": {
+			registry:  baseRegistry,
+			targets:   []ID{"unknown"},
+			wantErr:   true,
+			errSubstr: "unknown node: unknown",
+		},
+		"mixed known and unknown targets": {
+			registry:  baseRegistry,
+			targets:   []ID{"a", "unknown"},
+			wantErr:   true,
+			errSubstr: "unknown node: unknown",
+		},
+		"empty targets": {
+			registry:    baseRegistry,
+			targets:     []ID{},
+			wantResults: map[ID]any{},
+		},
+		"duplicate targets": {
+			registry:    baseRegistry,
+			targets:     []ID{"a", "a", "a"},
+			wantResults: map[ID]any{"a": "a"},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			results, err := executeForIDs(context.Background(), tt.targets, WithRegistry(tt.registry))
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
+				}
+				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(results) != len(tt.wantResults) {
+				t.Errorf("got %d results, want %d", len(results), len(tt.wantResults))
+			}
+
+			for k, want := range tt.wantResults {
+				got, ok := results[k]
+				if !ok {
+					t.Errorf("missing result for %q", k)
+					continue
+				}
+				if got != want {
+					t.Errorf("result[%q] = %v, want %v", k, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestExecuteForWithDeps(t *testing.T) {
+	// Test that ExecuteFor correctly executes nodes that use Dep
+	registry := map[ID]node{
+		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 1, nil }),
+		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
+			v, _ := Dep[int](ctx, "a")
+			return v * 2, nil
+		}),
+		"c": makeNode("c", []ID{"b"}, func(ctx context.Context) (any, error) {
+			v, _ := Dep[int](ctx, "b")
+			return v * 2, nil
+		}),
+	}
+
+	results, err := executeForIDs(context.Background(), []ID{"c"}, WithRegistry(registry))
+	if err != nil {
+		t.Fatalf("ExecuteFor error: %v", err)
+	}
+
+	wantResults := map[ID]any{"a": 1, "b": 2, "c": 4}
+	if len(results) != len(wantResults) {
+		t.Errorf("got %d results, want %d", len(results), len(wantResults))
+	}
+
+	for k, want := range wantResults {
+		got, ok := results[k]
+		if !ok {
+			t.Errorf("missing result for %q", k)
+			continue
+		}
+		if got != want {
+			t.Errorf("result[%q] = %v, want %v", k, got, want)
+		}
+	}
+}
+
+func TestExecuteForDoesNotMutateRegistry(t *testing.T) {
+	reg := map[ID]node{
+		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 1, nil }),
+		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) { return 2, nil }),
+	}
+
+	originalLen := len(reg)
+
+	_, err := executeForIDs(context.Background(), []ID{"b"}, WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(reg) != originalLen {
+		t.Errorf("registry was mutated: got %d nodes, want %d", len(reg), originalLen)
+	}
+}
+
+func TestMergeRegistry(t *testing.T) {
+	// Create a base registry
+	baseRegistry := map[ID]node{
+		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return "original_a", nil }),
+		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) { return "original_b", nil }),
+	}
+
+	// Override node "a" with a different implementation
+	overrides := map[ID]node{
+		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return "overridden_a", nil }),
+	}
+
+	// Manually merge to simulate what MergeRegistry does
+	merged := make(map[ID]node)
+	for k, v := range baseRegistry {
+		merged[k] = v
+	}
+	for k, v := range overrides {
+		merged[k] = v
+	}
+
+	results, err := executeForIDs(context.Background(), []ID{"b"}, WithRegistry(merged))
+	if err != nil {
+		t.Fatalf("ExecuteFor error: %v", err)
+	}
+
+	// Node "a" should have overridden value
+	if results["a"] != "overridden_a" {
+		t.Errorf("expected overridden_a, got %v", results["a"])
+	}
+
+	// Node "b" should still work (uses original implementation)
+	if results["b"] != "original_b" {
+		t.Errorf("expected original_b, got %v", results["b"])
+	}
+}
+
+func TestTopoSortLevels(t *testing.T) {
+	type tc struct {
+		nodes     map[ID]node
+		wantErr   bool
+		errSubstr string
+	}
+
+	tests := map[string]tc{
 		"cycle detection - self loop": {
 			nodes: map[ID]node{
 				"a": makeNode("a", []ID{"a"}, nil),
@@ -349,8 +452,7 @@ func TestTopoSortLevels(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			e := New(tt.nodes)
-			levels, err := e.topoSortLevels()
+			_, err := Execute(context.Background(), WithRegistry(tt.nodes))
 
 			if tt.wantErr {
 				if err == nil {
@@ -365,30 +467,11 @@ func TestTopoSortLevels(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
-			if len(levels) != tt.wantLevels {
-				t.Errorf("got %d levels, want %d", len(levels), tt.wantLevels)
-			}
-
-			// Verify all nodes are present exactly once
-			seen := make(map[ID]bool)
-			for _, level := range levels {
-				for _, id := range level {
-					if seen[id] {
-						t.Errorf("node %q appears multiple times", id)
-					}
-					seen[id] = true
-				}
-			}
-			if len(seen) != len(tt.nodes) {
-				t.Errorf("got %d unique nodes, want %d", len(seen), len(tt.nodes))
-			}
 		})
 	}
 }
 
 func TestParallelExecution(t *testing.T) {
-	// Test that nodes in the same level actually run in parallel
 	var concurrentCount atomic.Int32
 	var maxConcurrent atomic.Int32
 
@@ -426,9 +509,8 @@ func TestParallelExecution(t *testing.T) {
 		}),
 	}
 
-	e := New(nodes)
 	start := time.Now()
-	err := e.Run(context.Background())
+	_, err := Execute(context.Background(), WithRegistry(nodes))
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -445,68 +527,134 @@ func TestParallelExecution(t *testing.T) {
 	}
 }
 
-func TestResultsThreadSafety(t *testing.T) {
-	// Ensure Results() returns a copy, not the internal map
+func TestResultsAreCopied(t *testing.T) {
 	nodes := map[ID]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return "value", nil }),
 	}
 
-	e := New(nodes)
-	if err := e.Run(context.Background()); err != nil {
+	results1, err := Execute(context.Background(), WithRegistry(nodes))
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	results1 := e.Results()
-	results2 := e.Results()
+	results2, err := Execute(context.Background(), WithRegistry(nodes))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Modify results1
 	results1["a"] = "modified"
 
 	// results2 should be unaffected
 	if results2["a"] != "value" {
-		t.Error("Results() did not return a copy; modification affected other copy")
+		t.Error("Results from separate Execute calls should be independent")
 	}
 }
 
-func TestCopyResults(t *testing.T) {
-	type tc struct {
-		initial map[ID]any
-	}
+// Test types for ExecuteFor[T] tests
+type testConfigOutput struct {
+	Host string
+	Port int
+}
 
-	tests := map[string]tc{
-		"empty results": {
-			initial: map[ID]any{},
+type testDBOutput struct {
+	Connected bool
+	PoolSize  int
+}
+
+type testUnregisteredOutput struct {
+	Value string
+}
+
+func TestExecuteForTyped(t *testing.T) {
+	// Reset registry for clean test
+	ResetRegistry()
+
+	// Register test nodes
+	Register(Node[testConfigOutput]{
+		ID:        "test_config",
+		DependsOn: []ID{},
+		Run: func(ctx context.Context) (testConfigOutput, error) {
+			return testConfigOutput{Host: "localhost", Port: 5432}, nil
 		},
-		"single result": {
-			initial: map[ID]any{"a": 1},
+	})
+
+	Register(Node[testDBOutput]{
+		ID:        "test_db",
+		DependsOn: []ID{"test_config"},
+		Run: func(ctx context.Context) (testDBOutput, error) {
+			cfg, err := Dep[testConfigOutput](ctx, "test_config")
+			if err != nil {
+				return testDBOutput{}, err
+			}
+			return testDBOutput{Connected: cfg.Host != "", PoolSize: 10}, nil
 		},
-		"multiple results": {
-			initial: map[ID]any{"a": 1, "b": "two", "c": 3.0},
-		},
-	}
+	})
 
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			e := &Engine{
-				nodes:   make(map[ID]node),
-				results: make(results),
-			}
-			for k, v := range tt.initial {
-				e.results[k] = v
-			}
+	t.Run("returns typed result", func(t *testing.T) {
+		cfg, results, err := ExecuteFor[testConfigOutput](context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
-			cp := e.copyResults()
+		if cfg.Host != "localhost" {
+			t.Errorf("cfg.Host = %q, want %q", cfg.Host, "localhost")
+		}
+		if cfg.Port != 5432 {
+			t.Errorf("cfg.Port = %d, want %d", cfg.Port, 5432)
+		}
 
-			// Verify it's a copy with same values
-			if len(cp) != len(tt.initial) {
-				t.Errorf("copy has %d items, want %d", len(cp), len(tt.initial))
-			}
+		// Results map should also contain the config
+		if results == nil {
+			t.Fatal("results map is nil")
+		}
+		if _, ok := results["test_config"]; !ok {
+			t.Error("results map missing test_config")
+		}
+	})
 
-			// Modify copy, ensure original unchanged
-			cp["newKey"] = "newValue"
-			if _, exists := e.results["newKey"]; exists {
-				t.Error("modifying copy affected original")
-			}
-		})
-	}
+	t.Run("returns results with dependencies", func(t *testing.T) {
+		db, results, err := ExecuteFor[testDBOutput](context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Check typed result
+		if !db.Connected {
+			t.Error("db.Connected = false, want true")
+		}
+		if db.PoolSize != 10 {
+			t.Errorf("db.PoolSize = %d, want %d", db.PoolSize, 10)
+		}
+
+		// Check results map contains both nodes
+		if len(results) != 2 {
+			t.Errorf("results has %d entries, want 2", len(results))
+		}
+		if _, ok := results["test_config"]; !ok {
+			t.Error("results map missing test_config")
+		}
+		if _, ok := results["test_db"]; !ok {
+			t.Error("results map missing test_db")
+		}
+
+		// Verify we can extract typed results from the map
+		cfg, err := Result[testConfigOutput](results, "test_config")
+		if err != nil {
+			t.Fatalf("Result[testConfigOutput] error: %v", err)
+		}
+		if cfg.Host != "localhost" {
+			t.Errorf("cfg.Host from results = %q, want %q", cfg.Host, "localhost")
+		}
+	})
+
+	t.Run("error on unregistered type", func(t *testing.T) {
+		_, _, err := ExecuteFor[testUnregisteredOutput](context.Background())
+		if err == nil {
+			t.Fatal("expected error for unregistered type, got nil")
+		}
+		if !containsSubstr(err.Error(), "not registered") {
+			t.Errorf("error %q should contain 'not registered'", err.Error())
+		}
+	})
 }

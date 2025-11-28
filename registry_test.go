@@ -6,12 +6,10 @@ import (
 	"testing"
 )
 
-// resetRegistry clears the global registry for test isolation.
-// This is a test helper since the registry is a package-level global.
-func resetRegistry() {
-	for k := range registry {
-		delete(registry, k)
-	}
+// resetGlobalState clears both the global registry and cache for test isolation.
+func resetGlobalState() {
+	ResetRegistry()
+	ResetDefaultCache()
 }
 
 func TestRegister(t *testing.T) {
@@ -54,7 +52,7 @@ func TestRegister(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			resetRegistry()
+			resetGlobalState()
 
 			tt.registerNodes()
 
@@ -73,7 +71,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestRegisterDuplicatePanics(t *testing.T) {
-	resetRegistry()
+	resetGlobalState()
 
 	Register(Node[string]{
 		ID:  "duplicate",
@@ -110,12 +108,12 @@ func TestRegistry(t *testing.T) {
 
 	tests := map[string]tc{
 		"empty registry": {
-			setup:     func() { resetRegistry() },
+			setup:     func() { resetGlobalState() },
 			wantCount: 0,
 		},
 		"registry with nodes": {
 			setup: func() {
-				resetRegistry()
+				resetGlobalState()
 				Register(Node[string]{ID: "a", Run: func(ctx context.Context) (string, error) { return "", nil }})
 				Register(Node[int]{ID: "b", Run: func(ctx context.Context) (int, error) { return 0, nil }})
 			},
@@ -137,7 +135,7 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestRegistryReturnsCopy(t *testing.T) {
-	resetRegistry()
+	resetGlobalState()
 	Register(Node[string]{ID: "original", Run: func(ctx context.Context) (string, error) { return "", nil }})
 
 	copy1 := Registry()
@@ -157,27 +155,26 @@ func TestRegistryReturnsCopy(t *testing.T) {
 	}
 }
 
-func TestBuildFromRegistry(t *testing.T) {
+func TestExecuteFromRegistry(t *testing.T) {
 	type tc struct {
 		setup       func()
 		wantCount   int
-		verifyRun   bool
 		wantResults map[ID]any
 	}
 
 	tests := map[string]tc{
-		"build from empty registry": {
-			setup:     func() { resetRegistry() },
-			wantCount: 0,
+		"execute from empty registry": {
+			setup:       func() { resetGlobalState() },
+			wantCount:   0,
+			wantResults: map[ID]any{},
 		},
-		"build from populated registry": {
+		"execute from populated registry": {
 			setup: func() {
-				resetRegistry()
+				resetGlobalState()
 				Register(Node[int]{ID: "a", Run: func(ctx context.Context) (int, error) { return 1, nil }})
 				Register(Node[int]{ID: "b", Run: func(ctx context.Context) (int, error) { return 2, nil }})
 			},
 			wantCount:   2,
-			verifyRun:   true,
 			wantResults: map[ID]any{"a": 1, "b": 2},
 		},
 	}
@@ -186,30 +183,23 @@ func TestBuildFromRegistry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			tt.setup()
 
-			e := Build()
-			if e == nil {
-				t.Fatal("Build returned nil")
+			results, err := Execute(context.Background())
+			if err != nil {
+				t.Fatalf("Execute error: %v", err)
 			}
 
-			if len(e.nodes) != tt.wantCount {
-				t.Errorf("got %d nodes, want %d", len(e.nodes), tt.wantCount)
+			if len(results) != tt.wantCount {
+				t.Errorf("got %d results, want %d", len(results), tt.wantCount)
 			}
 
-			if tt.verifyRun {
-				if err := e.Run(context.Background()); err != nil {
-					t.Fatalf("Run error: %v", err)
+			for k, want := range tt.wantResults {
+				got, ok := results[k]
+				if !ok {
+					t.Errorf("missing result for %q", k)
+					continue
 				}
-
-				results := e.Results()
-				for k, want := range tt.wantResults {
-					got, ok := results[k]
-					if !ok {
-						t.Errorf("missing result for %q", k)
-						continue
-					}
-					if got != want {
-						t.Errorf("result[%q] = %v, want %v", k, got, want)
-					}
+				if got != want {
+					t.Errorf("result[%q] = %v, want %v", k, got, want)
 				}
 			}
 		})
@@ -217,7 +207,7 @@ func TestBuildFromRegistry(t *testing.T) {
 }
 
 func TestRegistryConcurrentAccess(t *testing.T) {
-	resetRegistry()
+	resetGlobalState()
 
 	var wg sync.WaitGroup
 	numGoroutines := 10
@@ -239,7 +229,7 @@ func TestRegistryConcurrentAccess(t *testing.T) {
 
 func TestTypedNodeExecution(t *testing.T) {
 	// Test that typed nodes execute correctly and return proper types
-	resetRegistry()
+	resetGlobalState()
 
 	type ConfigOutput struct {
 		Host string
@@ -266,12 +256,10 @@ func TestTypedNodeExecution(t *testing.T) {
 		},
 	})
 
-	e := Build()
-	if err := e.Run(context.Background()); err != nil {
-		t.Fatalf("Run error: %v", err)
+	results, err := Execute(context.Background())
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
 	}
-
-	results := e.Results()
 
 	// Verify config output
 	configResult, ok := results["config"]
@@ -293,5 +281,64 @@ func TestTypedNodeExecution(t *testing.T) {
 	}
 	if dbResult != "localhost:5432" {
 		t.Errorf("db result = %v, want localhost:5432", dbResult)
+	}
+}
+
+func TestResetRegistry(t *testing.T) {
+	// Start with clean state
+	ResetRegistry()
+
+	// Register a node
+	Register(Node[string]{
+		ID:  "test-node",
+		Run: func(ctx context.Context) (string, error) { return "value", nil },
+	})
+
+	// Verify it's there
+	if _, exists := registry["test-node"]; !exists {
+		t.Fatal("expected node in registry before reset")
+	}
+
+	// Reset
+	ResetRegistry()
+
+	// Verify it's gone
+	if _, exists := registry["test-node"]; exists {
+		t.Fatal("expected empty registry after reset")
+	}
+	if len(registry) != 0 {
+		t.Errorf("expected 0 nodes after reset, got %d", len(registry))
+	}
+}
+
+func TestTestIsolation(t *testing.T) {
+	// This test verifies that resetGlobalState clears both registry and cache
+	ctx := context.Background()
+
+	// Set up some state
+	Register(Node[string]{
+		ID:        "isolation-test",
+		Cacheable: true,
+		Run:       func(ctx context.Context) (string, error) { return "cached-value", nil },
+	})
+	defaultCache.Set(ctx, "isolation-test", "cached-value")
+
+	// Verify state exists
+	if _, exists := registry["isolation-test"]; !exists {
+		t.Fatal("expected node in registry")
+	}
+	if val, found, _ := defaultCache.Get(ctx, "isolation-test"); !found || val != "cached-value" {
+		t.Fatal("expected value in cache")
+	}
+
+	// Reset
+	resetGlobalState()
+
+	// Verify both are cleared
+	if _, exists := registry["isolation-test"]; exists {
+		t.Fatal("expected empty registry after resetGlobalState")
+	}
+	if _, found, _ := defaultCache.Get(ctx, "isolation-test"); found {
+		t.Fatal("expected empty cache after resetGlobalState")
 	}
 }

@@ -6,6 +6,10 @@ import "context"
 // It is populated at init time by calls to Register.
 var registry = make(map[ID]node)
 
+// typeToID maps output types to their node IDs.
+// This enables type-based ExecuteFor without reflection.
+var typeToID = make(map[any]ID)
+
 // Register adds a typed node to the global registry.
 //
 // The type parameter is erased internally for heterogeneous storage.
@@ -29,7 +33,7 @@ var registry = make(map[ID]node)
 //	func init() {
 //	    graft.Register(graft.Node[Output]{
 //	        ID:        "config",
-//	        DependsOn: []string{},
+//	        DependsOn: []graft.ID{},
 //	        Run:       loadConfig,
 //	    })
 //	}
@@ -53,24 +57,37 @@ func Register[T any](n Node[T]) {
 		run: func(ctx context.Context) (any, error) {
 			return n.Run(ctx)
 		},
+		cacheable: n.Cacheable,
 	}
+
+	// Record type → ID mapping using nil pointer sentinel
+	typeToID[(*T)(nil)] = n.ID
 }
 
 // Registry returns a copy of all registered nodes.
 //
 // The returned map is a copy; modifications do not affect the global registry.
-// This is commonly passed to [NewBuilder] for subgraph extraction.
+// This is commonly passed to [WithRegistry] for custom execution scenarios.
 //
 // Example:
 //
 //	nodes := graft.Registry()
 //	fmt.Printf("Registered %d nodes\n", len(nodes))
-//
-//	builder := graft.NewBuilder(graft.Registry())
 func Registry() map[ID]node {
 	cp := make(map[ID]node, len(registry))
 	for k, v := range registry {
 		cp[k] = v
 	}
 	return cp
+}
+
+// ResetRegistry clears the global registry.
+// This is primarily useful for test isolation.
+func ResetRegistry() {
+	for k := range registry {
+		delete(registry, k)
+	}
+	for k := range typeToID {
+		delete(typeToID, k)
+	}
 }

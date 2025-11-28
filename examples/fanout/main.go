@@ -19,16 +19,15 @@ import (
 )
 
 func main() {
-	engine := graft.Build()
-
 	start := time.Now()
-	if err := engine.Run(context.Background()); err != nil {
+	results, err := graft.Execute(context.Background())
+	if err != nil {
 		log.Fatal(err)
 	}
 	elapsed := time.Since(start)
 
 	fmt.Println("\n=== Results ===")
-	for id, result := range engine.Results() {
+	for id, result := range results {
 		fmt.Printf("%s: %+v\n", id, result)
 	}
 
