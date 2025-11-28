@@ -1,9 +1,13 @@
-# graft
+<p align="center">
+  <img src="logo.png" alt="graft" width="300">
+</p>
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/grindlemire/graft.svg)](https://pkg.go.dev/github.com/grindlemire/graft)
-[![Go Report Card](https://goreportcard.com/badge/github.com/grindlemire/graft)](https://goreportcard.com/report/github.com/grindlemire/graft)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Examples](https://img.shields.io/badge/Examples-📂-green.svg)](./examples)
+<p align="center">
+  <a href="https://pkg.go.dev/github.com/grindlemire/graft"><img src="https://pkg.go.dev/badge/github.com/grindlemire/graft.svg" alt="Go Reference"></a>
+  <a href="https://goreportcard.com/report/github.com/grindlemire/graft"><img src="https://goreportcard.com/badge/github.com/grindlemire/graft" alt="Go Report Card"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="./examples"><img src="https://img.shields.io/badge/Examples-📂-green.svg" alt="Examples"></a>
+</p>
 
 Graph-based dependency execution for Go. Nodes declare dependencies explicitly; the engine executes them in topological order with automatic parallelization.
 
