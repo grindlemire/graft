@@ -42,4 +42,3 @@ func run(ctx context.Context) (Output, error) {
 func SetRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, requestIDKey, id)
 }
-

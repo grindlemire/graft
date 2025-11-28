@@ -51,4 +51,3 @@ func run(ctx context.Context) (Output, error) {
 func ExecutionCount() int32 {
 	return executionCount.Load()
 }
-
