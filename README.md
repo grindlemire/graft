@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
+  <a href="https://pkg.go.dev/github.com/grindlemire/graft"><img src="https://pkg.go.dev/badge/github.com/grindlemire/graft.svg" alt="Go Reference"></a>
   <a href="https://github.com/grindlemire/graft/actions/workflows/ci.yml"><img src="https://github.com/grindlemire/graft/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://coveralls.io/github/grindlemire/graft?branch=main"><img src="https://coveralls.io/repos/github/grindlemire/graft/badge.svg?branch=main" alt="Coverage Status"></a>
-  <a href="https://pkg.go.dev/github.com/grindlemire/graft"><img src="https://pkg.go.dev/badge/github.com/grindlemire/graft.svg" alt="Go Reference"></a>
   <a href="https://goreportcard.com/report/github.com/grindlemire/graft"><img src="https://img.shields.io/badge/go%20report-A+-brightgreen.svg?style=flat" alt="Go Report Card"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="./examples"><img src="https://img.shields.io/badge/Examples-📂-green.svg" alt="Examples"></a>
