@@ -20,13 +20,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	configOutput, err := graft.Result[config.Output](results, config.ID)
+	configOutput, err := graft.Result[config.Output](results)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("%s: %+v\n", config.ID, configOutput)
 
-	dbOutput, err := graft.Result[db.Output](results, db.ID)
+	dbOutput, err := graft.Result[db.Output](results)
 	if err != nil {
 		log.Fatal(err)
 	}

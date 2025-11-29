@@ -239,7 +239,7 @@ func TestMixedCacheableNodes(t *testing.T) {
 			cacheable: true, // Startup node - cacheable
 			run: func(ctx context.Context) (any, error) {
 				dbExec.Add(1)
-				cfg, _ := Dep[string](ctx, "config")
+				cfg, _ := depByID[string](ctx, "config")
 				return "db-with-" + cfg, nil
 			},
 		},
@@ -249,7 +249,7 @@ func TestMixedCacheableNodes(t *testing.T) {
 			cacheable: false, // Request-scoped - not cacheable
 			run: func(ctx context.Context) (any, error) {
 				handlerExec.Add(1)
-				db, _ := Dep[string](ctx, "db")
+				db, _ := depByID[string](ctx, "db")
 				return "handled-" + db, nil
 			},
 		},

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestDep(t *testing.T) {
+func TestDepByID(t *testing.T) {
 	type tc struct {
 		ctx       context.Context
 		nodeID    ID
@@ -50,7 +50,7 @@ func TestDep(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			got, err := Dep[string](tt.ctx, tt.nodeID)
+			got, err := depByID[string](tt.ctx, tt.nodeID)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
@@ -70,7 +70,7 @@ func TestDep(t *testing.T) {
 	}
 }
 
-func TestDepGenericTypes(t *testing.T) {
+func TestDepByIDGenericTypes(t *testing.T) {
 	type customStruct struct {
 		Name  string
 		Value int
@@ -143,31 +143,31 @@ func TestDepGenericTypes(t *testing.T) {
 				// Type-specific retrieval based on test case
 				switch tt.results["node"].(type) {
 				case int:
-					got, err := Dep[int](ctx, tt.nodeID)
+					got, err := depByID[int](ctx, tt.nodeID)
 					if err != nil {
 						t.Fatalf("unexpected error: %v", err)
 					}
 					tt.checkFunc(t, got)
 				case []string:
-					got, err := Dep[[]string](ctx, tt.nodeID)
+					got, err := depByID[[]string](ctx, tt.nodeID)
 					if err != nil {
 						t.Fatalf("unexpected error: %v", err)
 					}
 					tt.checkFunc(t, got)
 				case customStruct:
-					got, err := Dep[customStruct](ctx, tt.nodeID)
+					got, err := depByID[customStruct](ctx, tt.nodeID)
 					if err != nil {
 						t.Fatalf("unexpected error: %v", err)
 					}
 					tt.checkFunc(t, got)
 				case *customStruct:
-					got, err := Dep[*customStruct](ctx, tt.nodeID)
+					got, err := depByID[*customStruct](ctx, tt.nodeID)
 					if err != nil {
 						t.Fatalf("unexpected error: %v", err)
 					}
 					tt.checkFunc(t, got)
 				case map[string]int:
-					got, err := Dep[map[string]int](ctx, tt.nodeID)
+					got, err := depByID[map[string]int](ctx, tt.nodeID)
 					if err != nil {
 						t.Fatalf("unexpected error: %v", err)
 					}

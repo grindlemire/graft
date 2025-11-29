@@ -26,12 +26,12 @@ func init() {
 }
 
 func run(ctx context.Context) (Output, error) {
-	cfg, err := graft.Dep[config.Output](ctx, config.ID)
+	cfg, err := graft.Dep[config.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}
 
-	reqLog, err := graft.Dep[requestlogger.Output](ctx, requestlogger.ID)
+	reqLog, err := graft.Dep[requestlogger.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}

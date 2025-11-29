@@ -50,11 +50,11 @@ func TestExecute(t *testing.T) {
 			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 10, nil }),
 				"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
-					val, _ := Dep[int](ctx, "a")
+					val, _ := depByID[int](ctx, "a")
 					return val * 2, nil
 				}),
 				"c": makeNode("c", []ID{"b"}, func(ctx context.Context) (any, error) {
-					val, _ := Dep[int](ctx, "b")
+					val, _ := depByID[int](ctx, "b")
 					return val * 2, nil
 				}),
 			},
@@ -65,16 +65,16 @@ func TestExecute(t *testing.T) {
 			nodes: map[ID]node{
 				"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 1, nil }),
 				"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
-					val, _ := Dep[int](ctx, "a")
+					val, _ := depByID[int](ctx, "a")
 					return val + 10, nil
 				}),
 				"c": makeNode("c", []ID{"a"}, func(ctx context.Context) (any, error) {
-					val, _ := Dep[int](ctx, "a")
+					val, _ := depByID[int](ctx, "a")
 					return val + 100, nil
 				}),
 				"d": makeNode("d", []ID{"b", "c"}, func(ctx context.Context) (any, error) {
-					b, _ := Dep[int](ctx, "b")
-					c, _ := Dep[int](ctx, "c")
+					b, _ := depByID[int](ctx, "b")
+					c, _ := depByID[int](ctx, "c")
 					return b + c, nil
 				}),
 			},
@@ -323,11 +323,11 @@ func TestExecuteForWithDeps(t *testing.T) {
 	registry := map[ID]node{
 		"a": makeNode("a", nil, func(ctx context.Context) (any, error) { return 1, nil }),
 		"b": makeNode("b", []ID{"a"}, func(ctx context.Context) (any, error) {
-			v, _ := Dep[int](ctx, "a")
+			v, _ := depByID[int](ctx, "a")
 			return v * 2, nil
 		}),
 		"c": makeNode("c", []ID{"b"}, func(ctx context.Context) (any, error) {
-			v, _ := Dep[int](ctx, "b")
+			v, _ := depByID[int](ctx, "b")
 			return v * 2, nil
 		}),
 	}
@@ -583,7 +583,7 @@ func TestExecuteForTyped(t *testing.T) {
 		ID:        "test_db",
 		DependsOn: []ID{"test_config"},
 		Run: func(ctx context.Context) (testDBOutput, error) {
-			cfg, err := Dep[testConfigOutput](ctx, "test_config")
+			cfg, err := Dep[testConfigOutput](ctx)
 			if err != nil {
 				return testDBOutput{}, err
 			}
@@ -639,7 +639,7 @@ func TestExecuteForTyped(t *testing.T) {
 		}
 
 		// Verify we can extract typed results from the map
-		cfg, err := Result[testConfigOutput](results, "test_config")
+		cfg, err := Result[testConfigOutput](results)
 		if err != nil {
 			t.Fatalf("Result[testConfigOutput] error: %v", err)
 		}

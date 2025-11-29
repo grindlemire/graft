@@ -25,7 +25,7 @@ func init() {
 }
 
 func run(ctx context.Context) (Output, error) {
-	authOut, err := graft.Dep[auth.Output](ctx, auth.ID)
+	authOut, err := graft.Dep[auth.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}

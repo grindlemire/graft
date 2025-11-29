@@ -27,12 +27,12 @@ func init() {
 }
 
 func run(ctx context.Context) (Output, error) {
-	userOut, err := graft.Dep[user.Output](ctx, user.ID)
+	userOut, err := graft.Dep[user.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}
 
-	adminOut, err := graft.Dep[admin.Output](ctx, admin.ID)
+	adminOut, err := graft.Dep[admin.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}

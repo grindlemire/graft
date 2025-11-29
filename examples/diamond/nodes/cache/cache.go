@@ -25,7 +25,7 @@ func init() {
 }
 
 func run(ctx context.Context) (Output, error) {
-	cfg, err := graft.Dep[config.Output](ctx, config.ID)
+	cfg, err := graft.Dep[config.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}

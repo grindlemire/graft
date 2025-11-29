@@ -20,7 +20,7 @@
 //	    ID:        "db",
 //	    DependsOn: []graft.ID{"config"},
 //	    Run: func(ctx context.Context) (*sql.DB, error) {
-//	        cfg, err := graft.Dep[Config](ctx, "config")
+//	        cfg, err := graft.Dep[Config](ctx)
 //	        if err != nil {
 //	            return nil, err
 //	        }
@@ -45,7 +45,7 @@
 //
 // Use [Dep] to retrieve dependency outputs with type safety:
 //
-//	cfg, err := graft.Dep[ConfigOutput](ctx, "config")
+//	cfg, err := graft.Dep[config.Output](ctx)
 //
 // # Subgraph Execution
 //
@@ -87,11 +87,11 @@ type ID string
 //
 //	graft.Node[MyOutput]{
 //	    ID:        "mynode",
-//	    DependsOn: []graft.ID{"config", "db"},
+//	    DependsOn: []graft.ID{config.ID, db.ID},
 //	    Run: func(ctx context.Context) (MyOutput, error) {
-//	        cfg, _ := graft.Dep[Config](ctx, "config")
-//	        db, _ := graft.Dep[*sql.DB](ctx, "db")
-//	        return doWork(cfg, db), nil
+//	        cfg, _ := graft.Dep[config.Output](ctx)
+//	        db, _ := graft.Dep[db.Output](ctx)
+//	        return doWork(cfg, db.Pool), nil
 //	    },
 //	}
 type Node[T any] struct {
@@ -105,7 +105,7 @@ type Node[T any] struct {
 	DependsOn []ID
 
 	// Run executes the node's business logic and returns a typed output.
-	// Dependencies are accessed via Dep[T](ctx, nodeID).
+	// Dependencies are accessed via Dep[T](ctx).
 	Run func(ctx context.Context) (T, error)
 
 	// Cacheable indicates whether this node's output should be cached.
@@ -141,23 +141,89 @@ func getResults(ctx context.Context) (results, bool) {
 // Dep retrieves a dependency's output from the context with type assertion.
 //
 // This is the primary way for nodes to access their dependencies' outputs.
-// The type parameter T specifies the expected output type.
+// The type parameter T specifies the expected output type, and the node ID
+// is derived from T using the type-to-ID mapping established at registration.
 //
 // Returns an error if:
+//   - The type T is not registered as a node output
 //   - The context has no results (called outside of a node's Run function)
-//   - The dependency nodeID is not found (not declared in DependsOn)
+//   - The dependency is not found (not declared in DependsOn)
 //   - The dependency's output cannot be asserted to type T
 //
 // Example:
 //
 //	func(ctx context.Context) (MyOutput, error) {
-//	    cfg, err := graft.Dep[config.Output](ctx, "config")
+//	    cfg, err := graft.Dep[config.Output](ctx)
 //	    if err != nil {
 //	        return MyOutput{}, err
 //	    }
 //	    // use cfg...
 //	}
-func Dep[T any](ctx context.Context, nodeID ID) (T, error) {
+func Dep[T any](ctx context.Context) (T, error) {
+	var zero T
+
+	id, ok := typeToID[(*T)(nil)]
+	if !ok {
+		return zero, fmt.Errorf("graft: type %T not registered as node output", zero)
+	}
+
+	r, ok := getResults(ctx)
+	if !ok {
+		return zero, fmt.Errorf("graft: no results in context")
+	}
+
+	val, ok := r[id]
+	if !ok {
+		return zero, fmt.Errorf("graft: dependency %q not found", id)
+	}
+
+	typed, ok := val.(T)
+	if !ok {
+		return zero, fmt.Errorf("graft: dependency %q has wrong type (got %T, want %T)", id, val, zero)
+	}
+
+	return typed, nil
+}
+
+// Result retrieves a node's output from a results map with type assertion.
+//
+// This is used after Execute/ExecuteFor to access node outputs from the
+// returned results map. The node ID is derived from T using the type-to-ID
+// mapping established at registration.
+//
+// Returns an error if:
+//   - The type T is not registered as a node output
+//   - The node is not found in the results
+//   - The output cannot be asserted to type T
+//
+// Example:
+//
+//	results, _ := graft.Execute(ctx)
+//	cfg, err := graft.Result[config.Output](results)
+func Result[T any](r results) (T, error) {
+	var zero T
+
+	id, ok := typeToID[(*T)(nil)]
+	if !ok {
+		return zero, fmt.Errorf("graft: type %T not registered as node output", zero)
+	}
+
+	val, ok := r[id]
+	if !ok {
+		return zero, fmt.Errorf("graft: result %q not found", id)
+	}
+
+	typed, ok := val.(T)
+	if !ok {
+		return zero, fmt.Errorf("graft: result %q has wrong type (got %T, want %T)", id, val, zero)
+	}
+
+	return typed, nil
+}
+
+// depByID is an internal helper for testing that retrieves a dependency by explicit ID.
+// This is needed for tests that use makeNode() to create nodes without going through Register.
+func depByID[T any](ctx context.Context, nodeID ID) (T, error) {
 	var zero T
 
 	r, ok := getResults(ctx)
@@ -178,17 +244,18 @@ func Dep[T any](ctx context.Context, nodeID ID) (T, error) {
 	return typed, nil
 }
 
-func Result[T any](r results, nodeID ID) (T, error) {
+// resultByID is an internal helper for testing that retrieves a result by explicit ID.
+func resultByID[T any](r results, nodeID ID) (T, error) {
 	var zero T
 
 	val, ok := r[nodeID]
 	if !ok {
-		return zero, fmt.Errorf("graft: dependency %q not found", nodeID)
+		return zero, fmt.Errorf("graft: result %q not found", nodeID)
 	}
 
 	typed, ok := val.(T)
 	if !ok {
-		return zero, fmt.Errorf("graft: dependency %q has wrong type (got %T, want %T)", nodeID, val, zero)
+		return zero, fmt.Errorf("graft: result %q has wrong type (got %T, want %T)", nodeID, val, zero)
 	}
 
 	return typed, nil

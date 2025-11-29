@@ -11,10 +11,6 @@
 
 Graph-based dependency execution for Go. Nodes declare dependencies explicitly; the engine executes them in topological order with automatic parallelization.
 
-## Why?
-
-Traditional DI frameworks rely on reflection or code generation. This library provides a simpler approach: nodes register themselves and declare what they depend on. Dependencies "just show up" without magic.
-
 ## Features
 
 - **Type-safe nodes** — Generic `Node[T]` with compile-time type checking
@@ -34,7 +30,9 @@ go get github.com/grindlemire/graft
 
 ### Define Nodes
 
-Each node is typically its own package with an `init()` that registers it:
+Each node is typically its own package with an `init()` that registers it.
+
+Suppose we need to load configuration to access our database:
 
 ```go
 // nodes/config/config.go
@@ -45,13 +43,16 @@ import (
     "github.com/grindlemire/graft"
 )
 
+// The ID of the node in the engine
 const ID graft.ID = "config"
 
+// The output type that other nodes will access
 type Output struct {
     DBHost string
     Port   int
 }
 
+// init registers the node automatically on startup
 func init() {
     graft.Register(graft.Node[Output]{
         ID:        ID,
@@ -60,12 +61,14 @@ func init() {
     })
 }
 
+// run is executed by the engine 
 func run(ctx context.Context) (Output, error) {
-    return Output{DBHost: "localhost", Port: 5432}, nil
+    return Output{DBHost: "localhost", Port: 8080}, nil
 }
 ```
 
-Nodes access dependencies via `graft.Dep[T]`:
+Now the database can specify the config node as a dependency and the engine
+will make sure it is run after the config node is executed. Nodes access dependencies via `graft.Dep[T]`:
 
 ```go
 // nodes/db/db.go
@@ -79,6 +82,7 @@ import (
 
 const ID graft.ID = "db"
 
+// Every node has an output type so other nodes can use it
 type Output struct {
     Pool *sql.DB
 }
@@ -86,13 +90,17 @@ type Output struct {
 func init() {
     graft.Register(graft.Node[Output]{
         ID:        ID,
+        // This node depends on the config node
         DependsOn: []graft.ID{config.ID},
         Run:       run,
+        // Nodes can choose to be cached so dependencies don't re-run the code every time
+        Cacheable: true
     })
 }
 
 func run(ctx context.Context) (Output, error) {
-    cfg, err := graft.Dep[config.Output](ctx, config.ID)
+    // We can get the config from the graph using the Dep function.
+    cfg, err := graft.Dep[config.Output](ctx)
     if err != nil {
         return Output{}, err
     }
@@ -122,18 +130,23 @@ import (
 )
 
 func main() {
+    // We could run the entire graph
     results, err := graft.Execute(context.Background())
     if err != nil {
         log.Fatal(err)
     }
     db := results["db"].(*sql.DB)
     // use db...
+
+
+    // OR we could just run what we need to for a chosen dependency
+    // db, _, err := graft.ExecuteFor[db.Output](context.Background())
 }
 ```
 
 ### Subgraph Execution
 
-Run a specific node and its transitive dependencies with type-safe results:
+You can choose to only run a specific node and its transitive dependencies with type-safe results:
 
 ```go
 // Only executes "api" and whatever it depends on
@@ -143,8 +156,8 @@ if err != nil {
     log.Fatal(err)
 }
 // api is already typed as api.Output
-// results map available for accessing other node outputs if needed
-config, _ := graft.Result[config.Output](results, config.ID)
+// the results map is available for accessing other node outputs if needed
+config, err := graft.Result[config.Output](results)
 ```
 
 ### Caching
@@ -185,8 +198,14 @@ func TestNodeDependencies(t *testing.T) {
 
 Catches:
 
-- Using `Dep[T](ctx, "x")` without declaring `"x"` in `DependsOn`
+- Using `Dep[T](ctx)` without declaring the corresponding dependency in `DependsOn`
 - Declaring a dependency that's never used
+
+## Why use this library?
+
+As teams or projects scale it can be challenging to efficiently route dependencies through the application while still writing idiomatic Go. Dependency injection frameworks attempt to solve this by allowing packages to just specify their dependencies but not how they are executed. However the larger dependency injection frameworks in Go either rely on reflection or large amounts of codegen.
+
+This library attempts to be a lighter weight and more straightforward alternative without relying either on reflection or code generation. Simply specify nodes in their own package and register them in an init function, then the engine take care of the rest.
 
 ## License
 

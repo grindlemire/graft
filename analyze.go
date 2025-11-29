@@ -281,40 +281,41 @@ func (a *nodeAnalyzer) Visit(n ast.Node) ast.Visitor {
 
 // extractDependsOn extracts declared dependencies from a DependsOn field value.
 // Handles string literals, identifiers, and selector expressions.
+// For selector expressions like pkg.ID, the package name is used as the dependency.
 func (a *nodeAnalyzer) extractDependsOn(n ast.Node) {
 	switch v := n.(type) {
 	case *ast.CompositeLit:
-		// []string{"dep1", "dep2"}
+		// []graft.ID{config.ID, db.ID} or []string{"dep1", "dep2"}
 		for _, elt := range v.Elts {
+			// Handle string literals
 			if lit, ok := elt.(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				dep := strings.Trim(lit.Value, `"`)
 				a.declaredDeps[dep] = true
+				continue
 			}
-		}
-	case *ast.CallExpr:
-		// Handle cases like []string{nodeA.ID, nodeB.ID} or function calls
-		for _, arg := range v.Args {
-			a.extractDependsOn(arg)
-		}
-	}
-
-	// Also handle inline composite literals with expressions
-	if comp, ok := n.(*ast.CompositeLit); ok {
-		for _, elt := range comp.Elts {
-			// Handle selector expressions like pkg.NodeID or consts
+			// Handle selector expressions like pkg.ID - use package name
 			if sel, ok := elt.(*ast.SelectorExpr); ok {
-				// Use the selector name as a hint (e.g., pkg.NodeID -> "NodeID" might be the ID)
-				a.declaredDeps[sel.Sel.Name] = true
+				if pkgIdent, ok := sel.X.(*ast.Ident); ok {
+					a.declaredDeps[pkgIdent.Name] = true
+				}
+				continue
 			}
 			// Handle identifiers (local constants)
 			if ident, ok := elt.(*ast.Ident); ok {
 				a.declaredDeps[ident.Name] = true
 			}
 		}
+	case *ast.CallExpr:
+		// Handle cases like []graft.ID{nodeA.ID, nodeB.ID} or function calls
+		for _, arg := range v.Args {
+			a.extractDependsOn(arg)
+		}
 	}
 }
 
-// checkDepCall looks for Dep[T](ctx, "nodeID") calls and extracts the nodeID.
+// checkDepCall looks for Dep[T](ctx) calls and extracts the dependency from
+// the type parameter T. For qualified types like pkg.Output, the package name
+// is used as the dependency ID.
 func (a *nodeAnalyzer) checkDepCall(n ast.Node) {
 	call, ok := n.(*ast.CallExpr)
 	if !ok {
@@ -322,49 +323,49 @@ func (a *nodeAnalyzer) checkDepCall(n ast.Node) {
 	}
 
 	// Check for graft.Dep[T](...) or Dep[T](...)
-	var funcName string
+	var typeExpr ast.Expr
 
 	switch fn := call.Fun.(type) {
 	case *ast.IndexExpr:
 		// Dep[T] - generic function call with single type param
 		switch x := fn.X.(type) {
 		case *ast.Ident:
-			funcName = x.Name
+			if x.Name == "Dep" {
+				typeExpr = fn.Index
+			}
 		case *ast.SelectorExpr:
 			if x.Sel.Name == "Dep" {
-				funcName = "Dep"
+				typeExpr = fn.Index
 			}
 		}
 	case *ast.IndexListExpr:
 		// Dep[T, U] - generic function with multiple type params (future-proofing)
 		switch x := fn.X.(type) {
 		case *ast.Ident:
-			funcName = x.Name
+			if x.Name == "Dep" && len(fn.Indices) > 0 {
+				typeExpr = fn.Indices[0]
+			}
 		case *ast.SelectorExpr:
-			if x.Sel.Name == "Dep" {
-				funcName = "Dep"
+			if x.Sel.Name == "Dep" && len(fn.Indices) > 0 {
+				typeExpr = fn.Indices[0]
 			}
 		}
 	}
 
-	if funcName != "Dep" {
+	if typeExpr == nil {
 		return
 	}
 
-	// Extract the nodeID from the second argument (first is ctx)
-	if len(call.Args) >= 2 {
-		if lit, ok := call.Args[1].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-			dep := strings.Trim(lit.Value, `"`)
-			a.usedDeps[dep] = true
+	// Extract dependency from the type parameter
+	// For pkg.Type (e.g., config.Output), use the package name as the dep
+	if sel, ok := typeExpr.(*ast.SelectorExpr); ok {
+		if pkgIdent, ok := sel.X.(*ast.Ident); ok {
+			a.usedDeps[pkgIdent.Name] = true
 		}
-		// Handle constants/identifiers
-		if ident, ok := call.Args[1].(*ast.Ident); ok {
-			a.usedDeps[ident.Name] = true
-		}
-		// Handle selector expressions (pkg.Const)
-		if sel, ok := call.Args[1].(*ast.SelectorExpr); ok {
-			a.usedDeps[sel.Sel.Name] = true
-		}
+	}
+	// For simple identifiers (same package), use the type name
+	if ident, ok := typeExpr.(*ast.Ident); ok {
+		a.usedDeps[ident.Name] = true
 	}
 }
 

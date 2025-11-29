@@ -21,15 +21,17 @@ func TestAnalyzeFile(t *testing.T) {
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/dep1"
+	"myapp/nodes/dep2"
 )
 
 var node = graft.Node[string]{
 	ID:        "mynode",
-	DependsOn: []string{"dep1", "dep2"},
+	DependsOn: []graft.ID{dep1.ID, dep2.ID},
 	Run: func(ctx context.Context) (string, error) {
-		v1, _ := graft.Dep[string](ctx, "dep1")
-		v2, _ := graft.Dep[int](ctx, "dep2")
-		return v1 + string(v2), nil
+		v1, _ := graft.Dep[dep1.Output](ctx)
+		v2, _ := graft.Dep[dep2.Output](ctx)
+		return v1.String() + v2.String(), nil
 	},
 }
 `,
@@ -53,15 +55,17 @@ var node = graft.Node[string]{
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/dep1"
+	"myapp/nodes/dep2"
 )
 
 var node = graft.Node[string]{
 	ID:        "mynode",
-	DependsOn: []string{"dep1"},
+	DependsOn: []graft.ID{dep1.ID},
 	Run: func(ctx context.Context) (string, error) {
-		v1, _ := graft.Dep[string](ctx, "dep1")
-		v2, _ := graft.Dep[string](ctx, "dep2") // not declared!
-		return v1 + v2, nil
+		v1, _ := graft.Dep[dep1.Output](ctx)
+		v2, _ := graft.Dep[dep2.Output](ctx) // not declared!
+		return v1.String() + v2.String(), nil
 	},
 }
 `,
@@ -79,15 +83,17 @@ var node = graft.Node[string]{
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/dep1"
+	"myapp/nodes/dep2"
 )
 
 var node = graft.Node[string]{
 	ID:        "mynode",
-	DependsOn: []string{"dep1", "dep2"},
+	DependsOn: []graft.ID{dep1.ID, dep2.ID},
 	Run: func(ctx context.Context) (string, error) {
-		v1, _ := graft.Dep[string](ctx, "dep1")
+		v1, _ := graft.Dep[dep1.Output](ctx)
 		// dep2 is declared but never used
-		return v1, nil
+		return v1.String(), nil
 	},
 }
 `,
@@ -123,9 +129,10 @@ var node = graft.Node[string]{
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/nodeA"
 )
 
-var nodeA = graft.Node[string]{
+var nodeADef = graft.Node[string]{
 	ID: "nodeA",
 	Run: func(ctx context.Context) (string, error) {
 		return "a", nil
@@ -134,10 +141,10 @@ var nodeA = graft.Node[string]{
 
 var nodeB = graft.Node[string]{
 	ID:        "nodeB",
-	DependsOn: []string{"nodeA"},
+	DependsOn: []graft.ID{nodeA.ID},
 	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[string](ctx, "nodeA")
-		return v, nil
+		v, _ := graft.Dep[nodeA.Output](ctx)
+		return v.String(), nil
 	},
 }
 `,
@@ -147,14 +154,17 @@ var nodeB = graft.Node[string]{
 		"local Node type (not a graft.Node)": {
 			code: `package graft
 
-import "context"
+import (
+	"context"
+	"myapp/nodes/dep1"
+)
 
 var node = Node[string]{
 	ID:        "localnode",
-	DependsOn: []string{"dep1"},
+	DependsOn: []ID{dep1.ID},
 	Run: func(ctx context.Context) (string, error) {
-		v, _ := Dep[string](ctx, "dep1")
-		return v, nil
+		v, _ := Dep[dep1.Output](ctx)
+		return v.String(), nil
 	},
 }
 `,
@@ -235,14 +245,15 @@ var nodeA = graft.Node[string]{
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/nodeA"
 )
 
 var nodeB = graft.Node[string]{
 	ID:        "nodeB",
-	DependsOn: []string{"nodeA"},
+	DependsOn: []graft.ID{nodeA.ID},
 	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[string](ctx, "nodeA")
-		return v, nil
+		v, _ := graft.Dep[nodeA.Output](ctx)
+		return v.String(), nil
 	},
 }
 `,
@@ -328,14 +339,15 @@ func TestValidateDeps(t *testing.T) {
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/dep1"
 )
 
 var node = graft.Node[string]{
 	ID:        "mynode",
-	DependsOn: []string{"dep1"},
+	DependsOn: []graft.ID{dep1.ID},
 	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[string](ctx, "dep1")
-		return v, nil
+		v, _ := graft.Dep[dep1.Output](ctx)
+		return v.String(), nil
 	},
 }
 `,
@@ -347,14 +359,15 @@ var node = graft.Node[string]{
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/undeclared"
 )
 
 var node = graft.Node[string]{
 	ID:        "mynode",
-	DependsOn: []string{},
+	DependsOn: []graft.ID{},
 	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[string](ctx, "undeclared")
-		return v, nil
+		v, _ := graft.Dep[undeclared.Output](ctx)
+		return v.String(), nil
 	},
 }
 `,

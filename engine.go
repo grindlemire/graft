@@ -150,7 +150,7 @@ func Execute(ctx context.Context, opts ...Option) (map[ID]any, error) {
 //	appOut, results, err := graft.ExecuteFor[app.Output](ctx)
 //	// appOut is typed as app.Output
 //	// results map available for accessing dependencies:
-//	config, _ := graft.Result[config.Output](results, config.ID)
+//	config, _ := graft.Result[config.Output](results)
 func ExecuteFor[T any](ctx context.Context, opts ...Option) (T, results, error) {
 	var zero T
 
@@ -164,7 +164,7 @@ func ExecuteFor[T any](ctx context.Context, opts ...Option) (T, results, error) 
 		return zero, nil, err
 	}
 
-	result, err := Result[T](results, id)
+	result, err := Result[T](results)
 	if err != nil {
 		return zero, nil, err
 	}

@@ -95,13 +95,13 @@ func handleUser() http.HandlerFunc {
 			return
 		}
 
-		config, err := graft.Result[config.Output](results, config.ID)
+		config, err := graft.Result[config.Output](results)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		db, err := graft.Result[db.Output](results, db.ID)
+		db, err := graft.Result[db.Output](results)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -136,7 +136,7 @@ func handleAdmin() http.HandlerFunc {
 			return
 		}
 
-		config, err := graft.Result[config.Output](results, config.ID)
+		config, err := graft.Result[config.Output](results)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

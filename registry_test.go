@@ -248,7 +248,7 @@ func TestTypedNodeExecution(t *testing.T) {
 		ID:        "db",
 		DependsOn: []ID{"config"},
 		Run: func(ctx context.Context) (string, error) {
-			cfg, err := Dep[ConfigOutput](ctx, "config")
+			cfg, err := Dep[ConfigOutput](ctx)
 			if err != nil {
 				return "", err
 			}

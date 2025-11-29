@@ -26,12 +26,12 @@ func init() {
 }
 
 func run(ctx context.Context) (Output, error) {
-	dbOut, err := graft.Dep[db.Output](ctx, db.ID)
+	dbOut, err := graft.Dep[db.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}
 
-	cacheOut, err := graft.Dep[cache.Output](ctx, cache.ID)
+	cacheOut, err := graft.Dep[cache.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}

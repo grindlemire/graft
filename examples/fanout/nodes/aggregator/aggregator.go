@@ -30,23 +30,23 @@ func init() {
 }
 
 func run(ctx context.Context) (Output, error) {
-	s1, err := graft.Dep[svc1.Output](ctx, svc1.ID)
+	s1, err := graft.Dep[svc1.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}
-	s2, err := graft.Dep[svc2.Output](ctx, svc2.ID)
+	s2, err := graft.Dep[svc2.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}
-	s3, err := graft.Dep[svc3.Output](ctx, svc3.ID)
+	s3, err := graft.Dep[svc3.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}
-	s4, err := graft.Dep[svc4.Output](ctx, svc4.ID)
+	s4, err := graft.Dep[svc4.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}
-	s5, err := graft.Dep[svc5.Output](ctx, svc5.ID)
+	s5, err := graft.Dep[svc5.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}

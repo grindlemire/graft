@@ -33,12 +33,12 @@ func init() {
 func run(ctx context.Context) (Output, error) {
 	userID := ctx.Value(userIDKey).(string)
 
-	dbConn, err := graft.Dep[db.Output](ctx, db.ID)
+	dbConn, err := graft.Dep[db.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}
 
-	reqLog, err := graft.Dep[requestlogger.Output](ctx, requestlogger.ID)
+	reqLog, err := graft.Dep[requestlogger.Output](ctx)
 	if err != nil {
 		return Output{}, err
 	}

@@ -46,14 +46,15 @@ func TestAssertDepsValid(t *testing.T) {
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/dep1"
 )
 
 var node = graft.Node[string]{
 	ID:        "mynode",
-	DependsOn: []string{"dep1"},
+	DependsOn: []graft.ID{dep1.ID},
 	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[string](ctx, "dep1")
-		return v, nil
+		v, _ := graft.Dep[dep1.Output](ctx)
+		return v.String(), nil
 	},
 }
 `,
@@ -67,14 +68,15 @@ var node = graft.Node[string]{
 import (
 	"context"
 	"github.com/grindlemire/graft"
+	"myapp/nodes/undeclared"
 )
 
 var node = graft.Node[string]{
 	ID:        "mynode",
-	DependsOn: []string{},
+	DependsOn: []graft.ID{},
 	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[string](ctx, "undeclared")
-		return v, nil
+		v, _ := graft.Dep[undeclared.Output](ctx)
+		return v.String(), nil
 	},
 }
 `,
