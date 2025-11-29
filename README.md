@@ -141,7 +141,7 @@ func main() {
     // use db...
 
 
-    // OR we could just run what we need to for a chosen dependency
+    // Or we could just run what we need to for a chosen dependency
     // db, _, err := graft.ExecuteFor[db.Output](context.Background())
 }
 ```
@@ -190,7 +190,7 @@ results, _ := graft.Execute(ctx, graft.DisableCache())
 
 ## Dependency Validation
 
-Static analysis catches dependency mismatches at test time:
+This library provides static analysis to catch dependency mismatches at test time:
 
 ```go
 func TestNodeDependencies(t *testing.T) {
@@ -207,7 +207,7 @@ Catches:
 
 As teams or projects scale it can be challenging to efficiently route dependencies through the application while still writing idiomatic Go. Dependency injection frameworks attempt to solve this by allowing packages to just specify their dependencies but not how they are executed. However the larger dependency injection frameworks in Go either rely on reflection or large amounts of codegen.
 
-This library attempts to be a lighter weight and more straightforward alternative without relying either on reflection or code generation. Simply specify nodes in their own package and register them in an init function, then the engine take care of the rest.
+This library attempts to be a lighter weight and more straightforward alternative without relying either on reflection or code generation. Simply specify nodes in their own package and register them in an init function, then the engine takes care of the rest.
 
 ## License
 
