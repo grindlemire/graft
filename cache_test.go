@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+func TestDefaultCache(t *testing.T) {
+	cache := DefaultCache()
+	if cache == nil {
+		t.Fatal("DefaultCache() returned nil")
+	}
+
+	// Verify it's the same instance as the internal defaultCache
+	if cache != defaultCache {
+		t.Error("DefaultCache() should return the same instance as internal defaultCache")
+	}
+
+	// Verify we can use it
+	ctx := context.Background()
+	if err := cache.Set(ctx, "test-default-cache", "value"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	val, found, _ := cache.Get(ctx, "test-default-cache")
+	if !found || val != "value" {
+		t.Error("DefaultCache() should be functional")
+	}
+
+	// Cleanup
+	cache.Delete("test-default-cache")
+}
+
 func TestResetDefaultCache(t *testing.T) {
 	ctx := context.Background()
 

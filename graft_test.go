@@ -220,6 +220,170 @@ func TestGetResultsWithoutContext(t *testing.T) {
 	}
 }
 
+// Test types for Dep and Result tests
+type depTestConfig struct {
+	Host string
+	Port int
+}
+
+type unregisteredType struct {
+	Value string
+}
+
+func TestDep(t *testing.T) {
+	type tc struct {
+		ctx       context.Context
+		wantVal   depTestConfig
+		wantErr   bool
+		errSubstr string
+	}
+
+	// Reset and register test type
+	ResetRegistry()
+
+	Register(Node[depTestConfig]{
+		ID:        "dep_test_config",
+		DependsOn: []ID{},
+		Run: func(ctx context.Context) (depTestConfig, error) {
+			return depTestConfig{Host: "localhost", Port: 5432}, nil
+		},
+	})
+
+	ctxWithConfig := withResults(context.Background(), results{
+		"dep_test_config": depTestConfig{Host: "localhost", Port: 5432},
+	})
+	ctxEmpty := withResults(context.Background(), results{})
+	ctxWrongType := withResults(context.Background(), results{
+		"dep_test_config": "wrong type",
+	})
+
+	tests := map[string]tc{
+		"success": {
+			ctx:     ctxWithConfig,
+			wantVal: depTestConfig{Host: "localhost", Port: 5432},
+			wantErr: false,
+		},
+		"no results in context": {
+			ctx:       context.Background(),
+			wantErr:   true,
+			errSubstr: "no results in context",
+		},
+		"dependency not found": {
+			ctx:       ctxEmpty,
+			wantErr:   true,
+			errSubstr: "not found",
+		},
+		"wrong type in results": {
+			ctx:       ctxWrongType,
+			wantErr:   true,
+			errSubstr: "wrong type",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := Dep[depTestConfig](tt.ctx)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
+				}
+				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.wantVal {
+				t.Errorf("got %+v, want %+v", got, tt.wantVal)
+			}
+		})
+	}
+
+	// Separate test for unregistered type (requires different type parameter)
+	t.Run("type not registered", func(t *testing.T) {
+		ctx := withResults(context.Background(), results{})
+		_, err := Dep[unregisteredType](ctx)
+		if err == nil {
+			t.Fatal("expected error for unregistered type")
+		}
+		if !containsSubstr(err.Error(), "not registered") {
+			t.Errorf("error %q should contain 'not registered'", err.Error())
+		}
+	})
+}
+
+func TestResult(t *testing.T) {
+	type tc struct {
+		results   results
+		wantVal   depTestConfig
+		wantErr   bool
+		errSubstr string
+	}
+
+	// Reset and register test type
+	ResetRegistry()
+
+	Register(Node[depTestConfig]{
+		ID:        "dep_test_config",
+		DependsOn: []ID{},
+		Run: func(ctx context.Context) (depTestConfig, error) {
+			return depTestConfig{Host: "localhost", Port: 5432}, nil
+		},
+	})
+
+	tests := map[string]tc{
+		"success": {
+			results: results{"dep_test_config": depTestConfig{Host: "testhost", Port: 1234}},
+			wantVal: depTestConfig{Host: "testhost", Port: 1234},
+			wantErr: false,
+		},
+		"result not found": {
+			results:   results{},
+			wantErr:   true,
+			errSubstr: "not found",
+		},
+		"wrong type in results": {
+			results:   results{"dep_test_config": 12345},
+			wantErr:   true,
+			errSubstr: "wrong type",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := Result[depTestConfig](tt.results)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
+				}
+				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.wantVal {
+				t.Errorf("got %+v, want %+v", got, tt.wantVal)
+			}
+		})
+	}
+
+	// Separate test for unregistered type (requires different type parameter)
+	t.Run("type not registered", func(t *testing.T) {
+		_, err := Result[unregisteredType](results{})
+		if err == nil {
+			t.Fatal("expected error for unregistered type")
+		}
+		if !containsSubstr(err.Error(), "not registered") {
+			t.Errorf("error %q should contain 'not registered'", err.Error())
+		}
+	})
+}
+
 func containsSubstr(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(s) > 0 && len(substr) > 0 && findSubstr(s, substr)))

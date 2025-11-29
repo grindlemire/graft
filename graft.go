@@ -243,20 +243,3 @@ func depByID[T any](ctx context.Context, nodeID ID) (T, error) {
 
 	return typed, nil
 }
-
-// resultByID is an internal helper for testing that retrieves a result by explicit ID.
-func resultByID[T any](r results, nodeID ID) (T, error) {
-	var zero T
-
-	val, ok := r[nodeID]
-	if !ok {
-		return zero, fmt.Errorf("graft: result %q not found", nodeID)
-	}
-
-	typed, ok := val.(T)
-	if !ok {
-		return zero, fmt.Errorf("graft: result %q has wrong type (got %T, want %T)", nodeID, val, zero)
-	}
-
-	return typed, nil
-}

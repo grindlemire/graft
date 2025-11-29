@@ -658,3 +658,159 @@ func TestExecuteForTyped(t *testing.T) {
 		}
 	})
 }
+
+func TestWithCacheOption(t *testing.T) {
+	var execCount atomic.Int32
+
+	nodes := map[ID]node{
+		"counter": makeNode("counter", nil, func(ctx context.Context) (any, error) {
+			execCount.Add(1)
+			return "executed", nil
+		}),
+	}
+	nodes["counter"] = node{
+		id:        "counter",
+		dependsOn: nil,
+		cacheable: true,
+		run: func(ctx context.Context) (any, error) {
+			execCount.Add(1)
+			return "executed", nil
+		},
+	}
+
+	customCache := NewMemoryCache()
+
+	// First execution with custom cache
+	_, err := Execute(context.Background(), WithRegistry(nodes), WithCache(customCache))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if execCount.Load() != 1 {
+		t.Fatalf("expected 1 execution, got %d", execCount.Load())
+	}
+
+	// Second execution - should use cache
+	_, err = Execute(context.Background(), WithRegistry(nodes), WithCache(customCache))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if execCount.Load() != 1 {
+		t.Fatalf("expected still 1 execution (cached), got %d", execCount.Load())
+	}
+
+	// Verify cache contains the value
+	val, found, _ := customCache.Get(context.Background(), "counter")
+	if !found {
+		t.Fatal("expected value in custom cache")
+	}
+	if val != "executed" {
+		t.Fatalf("expected 'executed', got %v", val)
+	}
+}
+
+func TestIgnoreCacheOption(t *testing.T) {
+	var execCount atomic.Int32
+
+	nodes := map[ID]node{
+		"counter": {
+			id:        "counter",
+			dependsOn: nil,
+			cacheable: true,
+			run: func(ctx context.Context) (any, error) {
+				execCount.Add(1)
+				return "executed", nil
+			},
+		},
+	}
+
+	customCache := NewMemoryCache()
+
+	// First execution - populates cache
+	_, err := Execute(context.Background(), WithRegistry(nodes), WithCache(customCache))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if execCount.Load() != 1 {
+		t.Fatalf("expected 1 execution, got %d", execCount.Load())
+	}
+
+	// Second execution with IgnoreCache - should re-execute
+	_, err = Execute(context.Background(), WithRegistry(nodes), WithCache(customCache), IgnoreCache("counter"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if execCount.Load() != 2 {
+		t.Fatalf("expected 2 executions (ignored cache), got %d", execCount.Load())
+	}
+}
+
+func TestDisableCacheOption(t *testing.T) {
+	var execCount atomic.Int32
+
+	nodes := map[ID]node{
+		"counter": {
+			id:        "counter",
+			dependsOn: nil,
+			cacheable: true,
+			run: func(ctx context.Context) (any, error) {
+				execCount.Add(1)
+				return "executed", nil
+			},
+		},
+	}
+
+	// First execution with DisableCache
+	_, err := Execute(context.Background(), WithRegistry(nodes), DisableCache())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if execCount.Load() != 1 {
+		t.Fatalf("expected 1 execution, got %d", execCount.Load())
+	}
+
+	// Second execution with DisableCache - should run again since cache is disabled
+	_, err = Execute(context.Background(), WithRegistry(nodes), DisableCache())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if execCount.Load() != 2 {
+		t.Fatalf("expected 2 executions (cache disabled), got %d", execCount.Load())
+	}
+}
+
+func TestMergeRegistryOption(t *testing.T) {
+	// Reset the global registry
+	ResetRegistry()
+
+	// Register a node in the global registry
+	Register(Node[string]{
+		ID:        "global_node",
+		DependsOn: []ID{},
+		Run: func(ctx context.Context) (string, error) {
+			return "global_value", nil
+		},
+	})
+
+	// Override with MergeRegistry
+	overrides := map[ID]node{
+		"global_node": makeNode("global_node", nil, func(ctx context.Context) (any, error) {
+			return "overridden_value", nil
+		}),
+	}
+
+	results, err := Execute(context.Background(), MergeRegistry(overrides))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have the overridden value
+	if results["global_node"] != "overridden_value" {
+		t.Errorf("expected 'overridden_value', got %v", results["global_node"])
+	}
+}
