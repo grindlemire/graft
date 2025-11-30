@@ -814,3 +814,118 @@ func TestMergeRegistryOption(t *testing.T) {
 		t.Errorf("expected 'overridden_value', got %v", results["global_node"])
 	}
 }
+
+// Test types for Patch tests
+type patchTestConfig struct {
+	Host string
+	Port int
+}
+
+type patchTestDB struct {
+	Connected bool
+}
+
+func TestPatchValueOption(t *testing.T) {
+	ResetRegistry()
+
+	var originalRan atomic.Bool
+
+	// Register original node
+	Register(Node[patchTestConfig]{
+		ID:        "patch_config",
+		DependsOn: []ID{},
+		Run: func(ctx context.Context) (patchTestConfig, error) {
+			originalRan.Store(true)
+			return patchTestConfig{Host: "original", Port: 5432}, nil
+		},
+	})
+
+	// Patch with static value
+	patchedValue := patchTestConfig{Host: "patched", Port: 9999}
+	results, err := Execute(context.Background(), PatchValue[patchTestConfig](patchedValue))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify patched value is returned
+	cfg, err := Result[patchTestConfig](results)
+	if err != nil {
+		t.Fatalf("Result error: %v", err)
+	}
+
+	if cfg.Host != "patched" {
+		t.Errorf("cfg.Host = %q, want %q", cfg.Host, "patched")
+	}
+	if cfg.Port != 9999 {
+		t.Errorf("cfg.Port = %d, want %d", cfg.Port, 9999)
+	}
+
+	// Verify original Run was never called
+	if originalRan.Load() {
+		t.Error("original Run function should not have been called")
+	}
+}
+
+func TestPatchOption(t *testing.T) {
+	ResetRegistry()
+
+	var originalRan atomic.Bool
+	var patchedRan atomic.Bool
+
+	// Register original nodes
+	Register(Node[patchTestConfig]{
+		ID:        "patch_config",
+		DependsOn: []ID{},
+		Run: func(ctx context.Context) (patchTestConfig, error) {
+			return patchTestConfig{Host: "original", Port: 5432}, nil
+		},
+	})
+
+	Register(Node[patchTestDB]{
+		ID:        "patch_db",
+		DependsOn: []ID{"patch_config"},
+		Run: func(ctx context.Context) (patchTestDB, error) {
+			originalRan.Store(true)
+			return patchTestDB{Connected: false}, nil
+		},
+	})
+
+	// Patch db node with custom implementation
+	results, err := Execute(context.Background(),
+		Patch[patchTestDB](Node[patchTestDB]{
+			DependsOn: []ID{"patch_config"},
+			Run: func(ctx context.Context) (patchTestDB, error) {
+				patchedRan.Store(true)
+				// Verify we can still access dependencies
+				cfg, err := Dep[patchTestConfig](ctx)
+				if err != nil {
+					return patchTestDB{}, err
+				}
+				return patchTestDB{Connected: cfg.Host == "original"}, nil
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify patched node ran
+	if !patchedRan.Load() {
+		t.Error("patched Run function should have been called")
+	}
+
+	// Verify original didn't run
+	if originalRan.Load() {
+		t.Error("original Run function should not have been called")
+	}
+
+	// Verify result
+	db, err := Result[patchTestDB](results)
+	if err != nil {
+		t.Fatalf("Result error: %v", err)
+	}
+
+	if !db.Connected {
+		t.Error("db.Connected = false, want true (patched logic should have set it based on config)")
+	}
+}

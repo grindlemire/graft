@@ -101,6 +101,75 @@ func DisableCache() Option {
 	}
 }
 
+// PatchValue replaces a node's output with a fixed value for testing.
+//
+// The node is identified by the type T, which must match a registered node's
+// output type. The patched node has no dependencies and simply returns the
+// provided value.
+//
+// This is a no-op if type T is not registered.
+//
+// Example:
+//
+//	// Replace config node with a test value
+//	results, err := graft.Execute(ctx,
+//	    graft.PatchValue[config.Output](config.Output{Host: "test", Port: 9999}),
+//	)
+func PatchValue[T any](value T) Option {
+	return func(c *config) {
+		id, ok := typeToID[(*T)(nil)]
+		if !ok {
+			return
+		}
+		if c.registry == nil {
+			c.registry = Registry()
+		}
+		c.registry[id] = node{
+			id:        id,
+			dependsOn: []ID{},
+			run:       func(ctx context.Context) (any, error) { return value, nil },
+		}
+	}
+}
+
+// Patch replaces a node with a custom node for testing.
+//
+// The node is identified by the type T, which must match a registered node's
+// output type. The patched node inherits DependsOn, Run, and Cacheable from
+// the provided Node[T].
+//
+// This is a no-op if type T is not registered.
+//
+// Example:
+//
+//	// Replace db node with a mock that uses config
+//	results, err := graft.Execute(ctx,
+//	    graft.Patch[db.Output](graft.Node[db.Output]{
+//	        DependsOn: []graft.ID{"config"},
+//	        Run: func(ctx context.Context) (db.Output, error) {
+//	            cfg, _ := graft.Dep[config.Output](ctx)
+//	            return db.Output{Pool: mockPool(cfg)}, nil
+//	        },
+//	    }),
+//	)
+func Patch[T any](n Node[T]) Option {
+	return func(c *config) {
+		id, ok := typeToID[(*T)(nil)]
+		if !ok {
+			return
+		}
+		if c.registry == nil {
+			c.registry = Registry()
+		}
+		c.registry[id] = node{
+			id:        id,
+			dependsOn: n.DependsOn,
+			run:       func(ctx context.Context) (any, error) { return n.Run(ctx) },
+			cacheable: n.Cacheable,
+		}
+	}
+}
+
 // Execute runs all registered nodes and returns their results.
 //
 // Nodes are executed in topological order with automatic parallelization.
