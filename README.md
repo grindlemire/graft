@@ -146,6 +146,63 @@ func main() {
 }
 ```
 
+### Subgraph Execution
+
+You can choose to only run a specific node and its transitive dependencies with type-safe results:
+
+```go
+// Only executes "api" and whatever it depends on
+// Returns typed result directly, plus full results map for accessing dependencies
+api, results, err := graft.ExecuteFor[api.Output](ctx)
+if err != nil {
+    log.Fatal(err)
+}
+// api is already typed as api.Output
+// the results map is available for accessing other node outputs if needed
+config, err := graft.Result[config.Output](results)
+```
+
+### Caching
+
+Mark nodes as cacheable to avoid re-execution across calls:
+
+```go
+graft.Register(graft.Node[Output]{
+    ID:        ID,
+    DependsOn: []graft.ID{},
+    Run:       run,
+    Cacheable: true, // output cached after first execution
+})
+```
+
+By default, a global in-memory cache is used. Options for control:
+
+```go
+// Use a custom cache
+results, _ := graft.Execute(ctx, graft.WithCache(myCache))
+
+// Force re-execution of specific nodes
+results, _ := graft.Execute(ctx, graft.IgnoreCache("config"))
+
+// Disable caching entirely
+results, _ := graft.Execute(ctx, graft.DisableCache())
+```
+
+## Dependency Validation
+
+This library provides static analysis to catch dependency mismatches at test time:
+
+```go
+func TestNodeDependencies(t *testing.T) {
+    graft.AssertDepsValid(t, ".")
+}
+```
+
+Catches:
+
+- Using `Dep[T](ctx)` without declaring the corresponding dependency in `DependsOn`
+- Declaring a dependency that's never used
+
 ### Visualizing the Graph
 
 You can visualize your dependency graph in two formats: ASCII diagrams for terminals and Mermaid diagrams for documentation.
@@ -238,63 +295,6 @@ graph TD
 ```
 
 Cacheable nodes are styled with a light blue fill (`fill:#e1f5fe`) in the Mermaid output.
-
-### Subgraph Execution
-
-You can choose to only run a specific node and its transitive dependencies with type-safe results:
-
-```go
-// Only executes "api" and whatever it depends on
-// Returns typed result directly, plus full results map for accessing dependencies
-api, results, err := graft.ExecuteFor[api.Output](ctx)
-if err != nil {
-    log.Fatal(err)
-}
-// api is already typed as api.Output
-// the results map is available for accessing other node outputs if needed
-config, err := graft.Result[config.Output](results)
-```
-
-### Caching
-
-Mark nodes as cacheable to avoid re-execution across calls:
-
-```go
-graft.Register(graft.Node[Output]{
-    ID:        ID,
-    DependsOn: []graft.ID{},
-    Run:       run,
-    Cacheable: true, // output cached after first execution
-})
-```
-
-By default, a global in-memory cache is used. Options for control:
-
-```go
-// Use a custom cache
-results, _ := graft.Execute(ctx, graft.WithCache(myCache))
-
-// Force re-execution of specific nodes
-results, _ := graft.Execute(ctx, graft.IgnoreCache("config"))
-
-// Disable caching entirely
-results, _ := graft.Execute(ctx, graft.DisableCache())
-```
-
-## Dependency Validation
-
-This library provides static analysis to catch dependency mismatches at test time:
-
-```go
-func TestNodeDependencies(t *testing.T) {
-    graft.AssertDepsValid(t, ".")
-}
-```
-
-Catches:
-
-- Using `Dep[T](ctx)` without declaring the corresponding dependency in `DependsOn`
-- Declaring a dependency that's never used
 
 ## Why use this library?
 
