@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
@@ -1148,128 +1147,6 @@ func TestTopoSortLevelsForGraph_TableDriven(t *testing.T) {
 
 			if tt.checkLevels != nil {
 				tt.checkLevels(t, levels)
-			}
-		})
-	}
-}
-
-func TestDetectTerminalWidth_TableDriven(t *testing.T) {
-	type tc struct {
-		name       string
-		setupEnv   func()
-		cleanupEnv func()
-		wantWidth  int
-		checkWidth func(t *testing.T, width int)
-	}
-
-	originalColumns := os.Getenv("COLUMNS")
-
-	tests := map[string]tc{
-		"default width": {
-			name: "default width",
-			setupEnv: func() {
-				os.Unsetenv("COLUMNS")
-			},
-			cleanupEnv: func() {
-				if originalColumns != "" {
-					os.Setenv("COLUMNS", originalColumns)
-				} else {
-					os.Unsetenv("COLUMNS")
-				}
-			},
-			wantWidth: 80,
-		},
-		"valid columns env": {
-			name: "valid columns env",
-			setupEnv: func() {
-				os.Setenv("COLUMNS", "120")
-			},
-			cleanupEnv: func() {
-				if originalColumns != "" {
-					os.Setenv("COLUMNS", originalColumns)
-				} else {
-					os.Unsetenv("COLUMNS")
-				}
-			},
-			wantWidth: 120,
-		},
-		"invalid columns env": {
-			name: "invalid columns env",
-			setupEnv: func() {
-				os.Setenv("COLUMNS", "invalid")
-			},
-			cleanupEnv: func() {
-				if originalColumns != "" {
-					os.Setenv("COLUMNS", originalColumns)
-				} else {
-					os.Unsetenv("COLUMNS")
-				}
-			},
-			wantWidth: 80,
-		},
-		"zero columns env": {
-			name: "zero columns env",
-			setupEnv: func() {
-				os.Setenv("COLUMNS", "0")
-			},
-			cleanupEnv: func() {
-				if originalColumns != "" {
-					os.Setenv("COLUMNS", originalColumns)
-				} else {
-					os.Unsetenv("COLUMNS")
-				}
-			},
-			wantWidth: 80,
-		},
-		"negative columns env": {
-			name: "negative columns env",
-			setupEnv: func() {
-				os.Setenv("COLUMNS", "-10")
-			},
-			cleanupEnv: func() {
-				if originalColumns != "" {
-					os.Setenv("COLUMNS", originalColumns)
-				} else {
-					os.Unsetenv("COLUMNS")
-				}
-			},
-			wantWidth: 80,
-		},
-		"very large columns": {
-			name: "very large columns",
-			setupEnv: func() {
-				os.Setenv("COLUMNS", "1000")
-			},
-			cleanupEnv: func() {
-				if originalColumns != "" {
-					os.Setenv("COLUMNS", originalColumns)
-				} else {
-					os.Unsetenv("COLUMNS")
-				}
-			},
-			wantWidth: 1000,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			if tt.setupEnv != nil {
-				tt.setupEnv()
-			}
-			if tt.cleanupEnv != nil {
-				defer tt.cleanupEnv()
-			}
-
-			width := detectTerminalWidth()
-
-			if tt.wantWidth != 0 {
-				if width != tt.wantWidth {
-					t.Errorf("got width %d, want %d", width, tt.wantWidth)
-				}
-			}
-
-			if tt.checkWidth != nil {
-				tt.checkWidth(t, width)
 			}
 		})
 	}

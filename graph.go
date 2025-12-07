@@ -3,9 +3,7 @@ package graft
 import (
 	"fmt"
 	"io"
-	"os"
 	"sort"
-	"strconv"
 )
 
 // PrintGraph outputs an ASCII representation of the dependency graph to the provided io.Writer.
@@ -29,8 +27,7 @@ func PrintGraph(w io.Writer, opts ...Option) error {
 		return err
 	}
 
-	width := detectTerminalWidth()
-	renderer := newGraphRenderer(cfg.registry, levels, width)
+	renderer := newGraphRenderer(cfg.registry, levels)
 	output := renderer.render()
 	fmt.Fprint(w, output)
 
@@ -128,15 +125,4 @@ func topoSortLevelsForGraph(nodes map[ID]node) ([][]ID, error) {
 	}
 
 	return levels, nil
-}
-
-// detectTerminalWidth attempts to detect terminal width, defaulting to 80.
-func detectTerminalWidth() int {
-	colsStr := os.Getenv("COLUMNS")
-	if colsStr != "" {
-		if cols, err := strconv.Atoi(colsStr); err == nil && cols > 0 {
-			return cols
-		}
-	}
-	return 80
 }

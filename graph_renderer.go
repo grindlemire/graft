@@ -10,7 +10,6 @@ import (
 type graphRenderer struct {
 	nodes  map[ID]node
 	levels [][]ID
-	width  int
 
 	// Layout state
 	nodePositions map[ID]position // node ID -> (row, col) in grid
@@ -33,11 +32,10 @@ type connectorInfo struct {
 	hasDown bool // connection going below
 }
 
-func newGraphRenderer(nodes map[ID]node, levels [][]ID, width int) *graphRenderer {
+func newGraphRenderer(nodes map[ID]node, levels [][]ID) *graphRenderer {
 	return &graphRenderer{
 		nodes:         nodes,
 		levels:        levels,
-		width:         width,
 		nodePositions: make(map[ID]position),
 		levelRows:     make(map[int][]int),
 	}
@@ -66,7 +64,7 @@ func (gr *graphRenderer) computeLayout() {
 		nodeWidths[id] = width
 	}
 
-	// Group levels into rows, handling wrapping
+	// Group levels into rows
 	type rowInfo struct {
 		nodes    []ID
 		levelIdx int
@@ -82,29 +80,32 @@ func (gr *graphRenderer) computeLayout() {
 			return sortedLevel[i] < sortedLevel[j]
 		})
 
-		// Distribute nodes across rows if level is too wide
-		currentRow := []ID{}
-		currentRowWidth := 0
+		// Put all nodes in a single row for this level
+		rows = append(rows, rowInfo{nodes: sortedLevel, levelIdx: levelIdx})
+	}
 
-		for _, id := range sortedLevel {
-			nodeWidth := nodeWidths[id]
-			neededWidth := nodeWidth
-			if len(currentRow) > 0 {
-				neededWidth += minSpacing
-			}
-
-			if currentRowWidth+neededWidth > gr.width && len(currentRow) > 0 {
-				// Start new row for this level
-				rows = append(rows, rowInfo{nodes: currentRow, levelIdx: levelIdx})
-				currentRow = []ID{id}
-				currentRowWidth = nodeWidth
-			} else {
-				currentRow = append(currentRow, id)
-				currentRowWidth += neededWidth
+	// Calculate level widths to determine maximum for centering
+	levelWidths := make(map[int]int)
+	for _, rowInfo := range rows {
+		levelIdx := rowInfo.levelIdx
+		rowNodes := rowInfo.nodes
+		totalWidth := 0
+		for i, id := range rowNodes {
+			totalWidth += nodeWidths[id]
+			if i < len(rowNodes)-1 {
+				totalWidth += minSpacing
 			}
 		}
-		if len(currentRow) > 0 {
-			rows = append(rows, rowInfo{nodes: currentRow, levelIdx: levelIdx})
+		if totalWidth > levelWidths[levelIdx] {
+			levelWidths[levelIdx] = totalWidth
+		}
+	}
+
+	// Find maximum level width for centering
+	maxLevelWidth := 0
+	for _, width := range levelWidths {
+		if width > maxLevelWidth {
+			maxLevelWidth = width
 		}
 	}
 
@@ -120,26 +121,18 @@ func (gr *graphRenderer) computeLayout() {
 		// Track which rows belong to this level
 		gr.levelRows[levelIdx] = append(gr.levelRows[levelIdx], rowOffset)
 
-		// Calculate horizontal spacing and center the row
-		totalWidth := 0
-		for _, id := range rowNodes {
-			totalWidth += nodeWidths[id]
-		}
-		spacing := minSpacing
-		if len(rowNodes) > 1 {
-			availableSpace := gr.width - totalWidth
-			spacing = availableSpace / (len(rowNodes) - 1)
-			if spacing < minSpacing {
-				spacing = minSpacing
+		// Calculate row width
+		rowWidth := 0
+		for i, id := range rowNodes {
+			rowWidth += nodeWidths[id]
+			if i < len(rowNodes)-1 {
+				rowWidth += minSpacing
 			}
 		}
 
-		// Calculate total row width and center it
-		rowWidth := totalWidth
-		if len(rowNodes) > 1 {
-			rowWidth += spacing * (len(rowNodes) - 1)
-		}
-		startCol := (gr.width - rowWidth) / 2
+		// Center this row relative to the maximum level width
+		spacing := minSpacing
+		startCol := (maxLevelWidth - rowWidth) / 2
 		if startCol < 0 {
 			startCol = 0
 		}
