@@ -314,7 +314,7 @@ func newEngine(nodes map[ID]node, cfg *config) *engine {
 }
 
 func (e *engine) run(ctx context.Context) error {
-	levels, err := e.topoSortLevels()
+	levels, err := topoSortLevels(e.nodes)
 	if err != nil {
 		return err
 	}
@@ -401,60 +401,4 @@ func (e *engine) copyResults() results {
 		cp[k] = v
 	}
 	return cp
-}
-
-// topoSortLevels groups nodes into execution levels using Kahn's algorithm.
-func (e *engine) topoSortLevels() ([][]ID, error) {
-	inDegree := make(map[ID]int)
-	for id := range e.nodes {
-		inDegree[id] = 0
-	}
-
-	for _, n := range e.nodes {
-		for _, dep := range n.dependsOn {
-			if _, exists := e.nodes[dep]; !exists {
-				return nil, fmt.Errorf("node %s depends on unknown node %s", n.id, dep)
-			}
-		}
-		inDegree[n.id] = len(n.dependsOn)
-	}
-
-	dependents := make(map[ID][]ID)
-	for _, n := range e.nodes {
-		for _, dep := range n.dependsOn {
-			dependents[dep] = append(dependents[dep], n.id)
-		}
-	}
-
-	var currentLevel []ID
-	for id, degree := range inDegree {
-		if degree == 0 {
-			currentLevel = append(currentLevel, id)
-		}
-	}
-
-	var levels [][]ID
-	processed := 0
-
-	for len(currentLevel) > 0 {
-		levels = append(levels, currentLevel)
-		processed += len(currentLevel)
-
-		var nextLevel []ID
-		for _, id := range currentLevel {
-			for _, dependent := range dependents[id] {
-				inDegree[dependent]--
-				if inDegree[dependent] == 0 {
-					nextLevel = append(nextLevel, dependent)
-				}
-			}
-		}
-		currentLevel = nextLevel
-	}
-
-	if processed != len(e.nodes) {
-		return nil, fmt.Errorf("cycle detected in dependency graph")
-	}
-
-	return levels, nil
 }

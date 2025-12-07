@@ -229,7 +229,7 @@ func TestTopoSortLevelsForGraph_CycleDetection(t *testing.T) {
 		},
 	}
 
-	_, err := topoSortLevelsForGraph(nodes)
+	_, err := topoSortLevels(nodes)
 	if err == nil {
 		t.Error("expected error for cycle, got nil")
 	}
@@ -247,7 +247,7 @@ func TestTopoSortLevelsForGraph_UnknownDependency(t *testing.T) {
 		},
 	}
 
-	_, err := topoSortLevelsForGraph(nodes)
+	_, err := topoSortLevels(nodes)
 	if err == nil {
 		t.Error("expected error for unknown dependency, got nil")
 	}
@@ -1105,7 +1105,7 @@ func TestTopoSortLevelsForGraph_TableDriven(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			levels, err := topoSortLevelsForGraph(tt.nodes)
+			levels, err := topoSortLevels(tt.nodes)
 
 			if tt.wantErr {
 				if err == nil {

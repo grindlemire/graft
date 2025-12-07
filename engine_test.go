@@ -3,6 +3,7 @@ package graft
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -107,7 +108,7 @@ func TestExecute(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
 				}
-				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -290,7 +291,7 @@ func TestExecuteFor(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
 				}
-				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -458,7 +459,7 @@ func TestTopoSortLevels(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
 				}
-				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -653,7 +654,7 @@ func TestExecuteForTyped(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for unregistered type, got nil")
 		}
-		if !containsSubstr(err.Error(), "not registered") {
+		if !strings.Contains(err.Error(), "not registered") {
 			t.Errorf("error %q should contain 'not registered'", err.Error())
 		}
 	})
@@ -663,12 +664,7 @@ func TestWithCacheOption(t *testing.T) {
 	var execCount atomic.Int32
 
 	nodes := map[ID]node{
-		"counter": makeNode("counter", nil, func(ctx context.Context) (any, error) {
-			execCount.Add(1)
-			return "executed", nil
-		}),
-	}
-	nodes["counter"] = node{
+		"counter": node{
 		id:        "counter",
 		dependsOn: nil,
 		cacheable: true,

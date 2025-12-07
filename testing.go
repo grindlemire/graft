@@ -10,7 +10,7 @@ import "testing"
 // against actual Dep[T] calls in Run functions.
 //
 // This will fail the test if:
-//   - Any node uses Dep[T](ctx, "x") without declaring "x" in DependsOn
+//   - Any node uses Dep[T](ctx) without declaring the corresponding dependency in DependsOn
 //   - Any node declares a dependency in DependsOn but never uses it
 //
 // Basic usage in your test file:
@@ -28,7 +28,7 @@ import "testing"
 // Example failure output:
 //
 //	graft.AssertDepsValid: db (nodes/db/db.go): undeclared deps: [cache]
-//	  → node "db" uses Dep[T](ctx, "cache") but does not declare it in DependsOn
+//	  → node "db" uses Dep[cache.Output](ctx) but does not declare "cache" in DependsOn
 func AssertDepsValid(t testing.TB, dir string) {
 	t.Helper()
 
@@ -49,7 +49,7 @@ func AssertDepsValid(t testing.TB, dir string) {
 		// Provide detailed breakdown
 		if len(r.Undeclared) > 0 {
 			for _, dep := range r.Undeclared {
-				t.Errorf("  → node %q uses Dep[T](ctx, %q) but does not declare it in DependsOn", r.NodeID, dep)
+				t.Errorf("  → node %q uses Dep[%s.Output](ctx) but does not declare %q in DependsOn", r.NodeID, dep, dep)
 			}
 		}
 		if len(r.Unused) > 0 {

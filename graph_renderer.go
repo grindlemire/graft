@@ -7,6 +7,34 @@ import (
 )
 
 // graphRenderer handles rendering the dependency graph to ASCII.
+//
+// Rendering Algorithm:
+//
+// The renderer uses a three-phase approach to create ASCII diagrams:
+//
+// 1. Layout Phase (computeLayout):
+//   - Groups nodes by topological level (already computed)
+//   - Calculates node widths based on ID length and cacheable markers
+//   - Positions nodes in a 2D grid, centering each level horizontally
+//   - Allocates vertical space: 3 rows per node box + 6 rows between levels
+//
+// 2. Node Drawing Phase (drawNodes):
+//   - Draws each node as a box using Unicode box-drawing characters
+//   - Adds cacheable markers (*) to node labels
+//   - Places nodes at their computed grid positions
+//
+// 3. Edge Drawing Phase (drawEdges):
+//   - Draws edges from parent nodes to their children
+//   - Uses a two-pass approach:
+//     a) First pass: Draws vertical and horizontal connector lines
+//     b) Second pass: Fixes junction characters (┼, ├, ┤, etc.) based on
+//     neighboring connections for proper visual appearance
+//   - Handles fanout (one parent to many children) with horizontal connectors
+//   - Handles merge (many parents to one child) with vertical drops to arrows
+//
+// The algorithm ensures deterministic output by sorting nodes within each level
+// alphabetically, and handles complex dependency patterns including diamonds,
+// fanouts, and linear chains.
 type graphRenderer struct {
 	nodes  map[ID]node
 	levels [][]ID

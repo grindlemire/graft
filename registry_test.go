@@ -2,6 +2,7 @@ package graft
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -87,7 +88,7 @@ func TestRegisterDuplicatePanics(t *testing.T) {
 				t.Errorf("panic value is not a string: %T", r)
 				return
 			}
-			if !containsSubstr(msg, "duplicate node registration") {
+			if !strings.Contains(msg, "duplicate node registration") {
 				t.Errorf("panic message %q should contain 'duplicate node registration'", msg)
 			}
 		}

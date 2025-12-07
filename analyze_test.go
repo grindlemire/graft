@@ -3,6 +3,7 @@ package graft
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -450,7 +451,7 @@ func TestAnalysisResultString(t *testing.T) {
 				t.Errorf("HasIssues() = %v, want %v", tt.result.HasIssues(), !tt.shouldBeOK)
 			}
 
-			if tt.wantSubstr != "" && !containsSubstr(s, tt.wantSubstr) {
+			if tt.wantSubstr != "" && !strings.Contains(s, tt.wantSubstr) {
 				t.Errorf("String() = %q, should contain %q", s, tt.wantSubstr)
 			}
 		})

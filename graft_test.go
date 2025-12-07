@@ -2,6 +2,7 @@ package graft
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -55,7 +56,7 @@ func TestDepByID(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
 				}
-				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -287,7 +288,7 @@ func TestDep(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
 				}
-				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -308,7 +309,7 @@ func TestDep(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for unregistered type")
 		}
-		if !containsSubstr(err.Error(), "not registered") {
+		if !strings.Contains(err.Error(), "not registered") {
 			t.Errorf("error %q should contain 'not registered'", err.Error())
 		}
 	})
@@ -358,7 +359,7 @@ func TestResult(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
 				}
-				if tt.errSubstr != "" && !containsSubstr(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error %q should contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -378,22 +379,8 @@ func TestResult(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for unregistered type")
 		}
-		if !containsSubstr(err.Error(), "not registered") {
+		if !strings.Contains(err.Error(), "not registered") {
 			t.Errorf("error %q should contain 'not registered'", err.Error())
 		}
 	})
-}
-
-func containsSubstr(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstr(s, substr)))
-}
-
-func findSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

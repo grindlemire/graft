@@ -13,16 +13,12 @@ func PrintGraph(w io.Writer, opts ...Option) error {
 		opt(cfg)
 	}
 
-	if cfg.registry == nil {
-		cfg.registry = Registry()
-	}
-
 	if len(cfg.registry) == 0 {
 		fmt.Fprintln(w, "No nodes registered")
 		return nil
 	}
 
-	levels, err := topoSortLevelsForGraph(cfg.registry)
+	levels, err := topoSortLevels(cfg.registry)
 	if err != nil {
 		return err
 	}
@@ -39,10 +35,6 @@ func PrintMermaid(w io.Writer, opts ...Option) error {
 	cfg := &config{registry: Registry()}
 	for _, opt := range opts {
 		opt(cfg)
-	}
-
-	if cfg.registry == nil {
-		cfg.registry = Registry()
 	}
 
 	fmt.Fprintln(w, "graph TD")
@@ -66,9 +58,10 @@ func PrintMermaid(w io.Writer, opts ...Option) error {
 	return nil
 }
 
-// topoSortLevelsForGraph computes topological levels for graph visualization.
-// This is similar to engine.topoSortLevels but standalone for graph rendering.
-func topoSortLevelsForGraph(nodes map[ID]node) ([][]ID, error) {
+// topoSortLevels computes topological levels using Kahn's algorithm.
+// Nodes are grouped into levels where all nodes in a level can execute concurrently.
+// Levels are sorted for deterministic output.
+func topoSortLevels(nodes map[ID]node) ([][]ID, error) {
 	inDegree := make(map[ID]int)
 	for id := range nodes {
 		inDegree[id] = 0

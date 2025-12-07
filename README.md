@@ -135,7 +135,7 @@ results, err := graft.Execute(context.Background())
 if err != nil {
     log.Fatal(err)
 }
-db := results["db"].(db.Output)
+db, _ := graft.Result[db.Output](results)
 ```
 
 ### Caching
