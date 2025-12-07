@@ -11,7 +11,11 @@
   <a href="./examples"><img src="https://img.shields.io/badge/Examples-📂-green.svg?cacheSeconds=86400" alt="Examples"></a>
 </p>
 
-Graph-based dependency execution for Go. Nodes declare dependencies explicitly; the engine executes them in topological order with automatic parallelization.
+Lightweight dependency injection for Go. Just declare what each component needs and the engine handles execution order and parallelization.
+
+## Why graft?
+
+Go's larger DI frameworks rely on reflection or heavy codegen. Graft takes a simpler approach: define nodes in their own packages, register them via `init()`, and let the engine figure out the rest. No reflection or code generation.
 
 ## Features
 
@@ -32,9 +36,7 @@ go get github.com/grindlemire/graft
 
 ### Define Nodes
 
-Each node is typically its own package with an `init()` that registers it.
-
-Suppose we need to load configuration to access our database:
+Each node lives in its own package with an `init()` that registers it:
 
 ```go
 // nodes/config/config.go
@@ -45,63 +47,46 @@ import (
     "github.com/grindlemire/graft"
 )
 
-// The ID of the node in the engine
 const ID graft.ID = "config"
 
-// The output type that other nodes will access
 type Output struct {
     DBHost string
     Port   int
 }
 
-// init registers the node automatically on startup
 func init() {
     graft.Register(graft.Node[Output]{
         ID:        ID,
-        DependsOn: []graft.ID{}, // root node
+        DependsOn: []graft.ID{},
         Run:       run,
     })
 }
 
-// run is executed by the engine 
 func run(ctx context.Context) (Output, error) {
     return Output{DBHost: "localhost", Port: 8080}, nil
 }
 ```
 
-Now the database can specify the config node as a dependency and the engine
-will make sure it is run after the config node is executed. Nodes access dependencies via `graft.Dep[T]`:
+Nodes declare dependencies and access them via `graft.Dep[T]`:
 
 ```go
 // nodes/db/db.go
 package db
 
-import (
-    "context"
-    "github.com/grindlemire/graft"
-    "myapp/nodes/config"
-)
-
 const ID graft.ID = "db"
 
-// Every node has an output type so other nodes can use it
-type Output struct {
-    Pool *sql.DB
-}
+type Output struct{ Pool *sql.DB }
 
 func init() {
     graft.Register(graft.Node[Output]{
         ID:        ID,
-        // This node depends on the config node
         DependsOn: []graft.ID{config.ID},
         Run:       run,
-        // Nodes can choose to be cached so dependencies don't re-run the code every time
-        Cacheable: true
+        Cacheable: true,
     })
 }
 
 func run(ctx context.Context) (Output, error) {
-    // We can get the config from the graph using the Dep function.
     cfg, err := graft.Dep[config.Output](ctx)
     if err != nil {
         return Output{}, err
@@ -124,73 +109,57 @@ package main
 import (
     "context"
     "log"
-
     "github.com/grindlemire/graft"
     _ "myapp/nodes/config"
     _ "myapp/nodes/db"
-    _ "myapp/nodes/api"
 )
 
 func main() {
-    // We could run the entire graph
     results, err := graft.Execute(context.Background())
     if err != nil {
         log.Fatal(err)
     }
     db := results["db"].(*sql.DB)
-    // use db...
-
-
-    // Or we could just run what we need to for a chosen dependency
-    // db, _, err := graft.ExecuteFor[db.Output](context.Background())
 }
 ```
 
 ### Subgraph Execution
 
-You can choose to only run a specific node and its transitive dependencies with type-safe results:
+Run only a specific node and its transitive dependencies:
 
 ```go
-// Only executes "api" and whatever it depends on
-// Returns typed result directly, plus full results map for accessing dependencies
 api, results, err := graft.ExecuteFor[api.Output](ctx)
 if err != nil {
     log.Fatal(err)
 }
-// api is already typed as api.Output
-// the results map is available for accessing other node outputs if needed
+// api is typed as api.Output; results map available for other node outputs
 config, err := graft.Result[config.Output](results)
 ```
 
 ### Caching
 
-Mark nodes as cacheable to avoid re-execution across calls:
+Mark nodes as cacheable to skip re-execution:
 
 ```go
 graft.Register(graft.Node[Output]{
     ID:        ID,
     DependsOn: []graft.ID{},
     Run:       run,
-    Cacheable: true, // output cached after first execution
+    Cacheable: true,
 })
 ```
 
-By default, a global in-memory cache is used. Options for control:
+Cache options:
 
 ```go
-// Use a custom cache
-results, _ := graft.Execute(ctx, graft.WithCache(myCache))
-
-// Force re-execution of specific nodes
-results, _ := graft.Execute(ctx, graft.IgnoreCache("config"))
-
-// Disable caching entirely
-results, _ := graft.Execute(ctx, graft.DisableCache())
+graft.Execute(ctx, graft.WithCache(myCache))    // custom cache
+graft.Execute(ctx, graft.IgnoreCache("config")) // force re-run specific nodes
+graft.Execute(ctx, graft.DisableCache())        // disable caching entirely
 ```
 
 ## Dependency Validation
 
-This library provides static analysis to catch dependency mismatches at test time:
+Static analysis catches dependency mismatches at test time:
 
 ```go
 func TestNodeDependencies(t *testing.T) {
@@ -198,29 +167,17 @@ func TestNodeDependencies(t *testing.T) {
 }
 ```
 
-Catches:
+This catches using `Dep[T](ctx)` without declaring the dependency, or declaring unused dependencies.
 
-- Using `Dep[T](ctx)` without declaring the corresponding dependency in `DependsOn`
-- Declaring a dependency that's never used
+## Visualizing the Graph
 
-### Visualizing the Graph
-
-You can visualize your dependency graph in two formats: ASCII diagrams for terminals and Mermaid diagrams for documentation.
-
-#### ASCII Diagram
-
-Use `PrintGraph()` to output an ASCII representation of your dependency graph:
+### ASCII Diagram
 
 ```go
-import (
-    "os"
-    "github.com/grindlemire/graft"
-)
-
 graft.PrintGraph(os.Stdout)
 ```
 
-Example output for a simple linear chain (`config → db → app`):
+Output for `config → db → app`:
 
 ```text
                                    ┌────────┐
@@ -240,42 +197,11 @@ Example output for a simple linear chain (`config → db → app`):
                                     └─────┘
 ```
 
-Example output for a diamond pattern (`config → db, cache → api`):
-
-```text
-                                   ┌────────┐
-                                   │ config │
-                                   └────────┘
-    ┌───────────────────────────────────┴───────────────────────────────────┐
-    │                                                                       │
-    ▼                                                                       ▼
-┌───────┐                                                                ┌────┐
-│ cache │                                                                │ db │
-└───────┘                                                                └────┘
-    └──────────────────────────────────┬────────────────────────────────────┘
-                                       │
-                                       ▼
-                                    ┌─────┐
-                                    │ api │
-                                    └─────┘
-```
-
-Cacheable nodes are marked with an asterisk (`*`) in the ASCII output.
-
-#### Mermaid Diagram
-
-Use `PrintMermaid()` to output a Mermaid diagram that can be rendered in Markdown files, documentation sites, or Mermaid-compatible viewers:
+### Mermaid Diagram
 
 ```go
-import (
-    "os"
-    "github.com/grindlemire/graft"
-)
-
 graft.PrintMermaid(os.Stdout)
 ```
-
-Example output for a simple linear chain:
 
 ```mermaid
 graph TD
@@ -283,24 +209,7 @@ graph TD
     db --> app
 ```
 
-Example output for a diamond pattern:
-
-```mermaid
-graph TD
-    config --> db
-    config --> cache
-    db --> api
-    cache --> api
-    style cache fill:#e1f5fe
-```
-
-Cacheable nodes are styled with a light blue fill (`fill:#e1f5fe`) in the Mermaid output.
-
-## Why use this library?
-
-As teams or projects scale it can be challenging to efficiently route dependencies through the application while still writing idiomatic Go. Dependency injection frameworks attempt to solve this by allowing packages to just specify their dependencies but not how they are executed. However the larger dependency injection frameworks in Go either rely on reflection or large amounts of codegen.
-
-This library attempts to be a lighter weight and more straightforward alternative without relying either on reflection or code generation. Simply specify nodes in their own package and register them in an init function, then the engine takes care of the rest.
+Cacheable nodes are marked with `*` (ASCII) or styled with light blue fill (Mermaid).
 
 ## License
 
