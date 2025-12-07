@@ -146,6 +146,99 @@ func main() {
 }
 ```
 
+### Visualizing the Graph
+
+You can visualize your dependency graph in two formats: ASCII diagrams for terminals and Mermaid diagrams for documentation.
+
+#### ASCII Diagram
+
+Use `PrintGraph()` to output an ASCII representation of your dependency graph:
+
+```go
+import (
+    "os"
+    "github.com/grindlemire/graft"
+)
+
+graft.PrintGraph(os.Stdout)
+```
+
+Example output for a simple linear chain (`config → db → app`):
+
+```text
+                                   ┌────────┐
+                                   │ config │
+                                   └────────┘
+                                       ┌┘
+                                       │
+                                       ▼
+                                    ┌────┐
+                                    │ db │
+                                    └────┘
+                                       │
+                                       │
+                                       ▼
+                                    ┌─────┐
+                                    │ app │
+                                    └─────┘
+```
+
+Example output for a diamond pattern (`config → db, cache → api`):
+
+```text
+                                   ┌────────┐
+                                   │ config │
+                                   └────────┘
+    ┌───────────────────────────────────┴───────────────────────────────────┐
+    │                                                                       │
+    ▼                                                                       ▼
+┌───────┐                                                                ┌────┐
+│ cache │                                                                │ db │
+└───────┘                                                                └────┘
+    └──────────────────────────────────┬────────────────────────────────────┘
+                                       │
+                                       ▼
+                                    ┌─────┐
+                                    │ api │
+                                    └─────┘
+```
+
+Cacheable nodes are marked with an asterisk (`*`) in the ASCII output.
+
+#### Mermaid Diagram
+
+Use `PrintMermaid()` to output a Mermaid diagram that can be rendered in Markdown files, documentation sites, or Mermaid-compatible viewers:
+
+```go
+import (
+    "os"
+    "github.com/grindlemire/graft"
+)
+
+graft.PrintMermaid(os.Stdout)
+```
+
+Example output for a simple linear chain:
+
+```mermaid
+graph TD
+    config --> db
+    db --> app
+```
+
+Example output for a diamond pattern:
+
+```mermaid
+graph TD
+    config --> db
+    config --> cache
+    db --> api
+    cache --> api
+    style cache fill:#e1f5fe
+```
+
+Cacheable nodes are styled with a light blue fill (`fill:#e1f5fe`) in the Mermaid output.
+
 ### Subgraph Execution
 
 You can choose to only run a specific node and its transitive dependencies with type-safe results:

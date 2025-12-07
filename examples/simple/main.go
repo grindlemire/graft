@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/grindlemire/graft"
 
@@ -31,4 +32,11 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("%s: %+v\n", db.ID, dbOutput)
+
+	fmt.Printf("\n=== Graph ===\n")
+	err = graft.PrintGraph(os.Stdout)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("\n\n")
 }

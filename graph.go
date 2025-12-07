@@ -1,0 +1,142 @@
+package graft
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strconv"
+)
+
+// PrintGraph outputs an ASCII representation of the dependency graph to the provided io.Writer.
+func PrintGraph(w io.Writer, opts ...Option) error {
+	cfg := &config{registry: Registry()}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.registry == nil {
+		cfg.registry = Registry()
+	}
+
+	if len(cfg.registry) == 0 {
+		fmt.Fprintln(w, "No nodes registered")
+		return nil
+	}
+
+	levels, err := topoSortLevelsForGraph(cfg.registry)
+	if err != nil {
+		return err
+	}
+
+	width := detectTerminalWidth()
+	renderer := newGraphRenderer(cfg.registry, levels, width)
+	output := renderer.render()
+	fmt.Fprint(w, output)
+
+	return nil
+}
+
+// PrintMermaid outputs a Mermaid diagram of the dependency graph to the provided io.Writer.
+func PrintMermaid(w io.Writer, opts ...Option) error {
+	cfg := &config{registry: Registry()}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.registry == nil {
+		cfg.registry = Registry()
+	}
+
+	fmt.Fprintln(w, "graph TD")
+
+	if len(cfg.registry) == 0 {
+		return nil
+	}
+
+	for id, n := range cfg.registry {
+		for _, dep := range n.dependsOn {
+			fmt.Fprintf(w, "    %s --> %s\n", dep, id)
+		}
+	}
+
+	for id, n := range cfg.registry {
+		if n.cacheable {
+			fmt.Fprintf(w, "    style %s fill:#e1f5fe\n", id)
+		}
+	}
+
+	return nil
+}
+
+// topoSortLevelsForGraph computes topological levels for graph visualization.
+// This is similar to engine.topoSortLevels but standalone for graph rendering.
+func topoSortLevelsForGraph(nodes map[ID]node) ([][]ID, error) {
+	inDegree := make(map[ID]int)
+	for id := range nodes {
+		inDegree[id] = 0
+	}
+
+	for _, n := range nodes {
+		for _, dep := range n.dependsOn {
+			if _, exists := nodes[dep]; !exists {
+				return nil, fmt.Errorf("node %s depends on unknown node %s", n.id, dep)
+			}
+		}
+		inDegree[n.id] = len(n.dependsOn)
+	}
+
+	dependents := make(map[ID][]ID)
+	for _, n := range nodes {
+		for _, dep := range n.dependsOn {
+			dependents[dep] = append(dependents[dep], n.id)
+		}
+	}
+
+	var currentLevel []ID
+	for id, degree := range inDegree {
+		if degree == 0 {
+			currentLevel = append(currentLevel, id)
+		}
+	}
+
+	var levels [][]ID
+	processed := 0
+
+	for len(currentLevel) > 0 {
+		// Sort for deterministic output
+		sort.Slice(currentLevel, func(i, j int) bool {
+			return currentLevel[i] < currentLevel[j]
+		})
+		levels = append(levels, currentLevel)
+		processed += len(currentLevel)
+
+		var nextLevel []ID
+		for _, id := range currentLevel {
+			for _, dependent := range dependents[id] {
+				inDegree[dependent]--
+				if inDegree[dependent] == 0 {
+					nextLevel = append(nextLevel, dependent)
+				}
+			}
+		}
+		currentLevel = nextLevel
+	}
+
+	if processed != len(nodes) {
+		return nil, fmt.Errorf("cycle detected in dependency graph")
+	}
+
+	return levels, nil
+}
+
+// detectTerminalWidth attempts to detect terminal width, defaulting to 80.
+func detectTerminalWidth() int {
+	colsStr := os.Getenv("COLUMNS")
+	if colsStr != "" {
+		if cols, err := strconv.Atoi(colsStr); err == nil && cols > 0 {
+			return cols
+		}
+	}
+	return 80
+}

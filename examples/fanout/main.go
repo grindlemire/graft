@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/grindlemire/graft"
@@ -35,4 +36,10 @@ func main() {
 	fmt.Printf("Total execution time: %v\n", elapsed)
 	fmt.Println("All 5 services ran in parallel!")
 	fmt.Println("Sequential would be: ~1020ms")
+
+	fmt.Printf("\n=== Graph ===\n")
+	err = graft.PrintGraph(os.Stdout)
+	if err != nil {
+		log.Fatal(err)
+	}
 }

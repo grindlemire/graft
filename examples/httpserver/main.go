@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 
@@ -43,6 +44,13 @@ func main() {
 	fmt.Println("  - Request-scoped nodes (request_logger, handlers) execute every request")
 	fmt.Println("  - Watch /stats to confirm config/db stay at 1 execution")
 	fmt.Println()
+
+	fmt.Printf("\n=== Graph ===\n")
+	err := graft.PrintGraph(os.Stdout)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("\n\n")
 
 	mux := http.NewServeMux()
 
