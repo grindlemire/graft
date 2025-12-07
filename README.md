@@ -115,25 +115,27 @@ import (
 )
 
 func main() {
-    results, err := graft.Execute(context.Background())
+    // Run a specific node and its transitive dependencies
+    // dbOutput is typed as db.Output
+    dbOutput, results, err := graft.ExecuteFor[db.Output](context.Background())
     if err != nil {
         log.Fatal(err)
     }
-    db := results["db"].(*sql.DB)
+    // The results map is available for other node outputs
+    cfg, _ := graft.Result[config.Output](results)
 }
 ```
 
-### Subgraph Execution
+### Full Graph Execution
 
-Run only a specific node and its transitive dependencies:
+To run every registered node:
 
 ```go
-api, results, err := graft.ExecuteFor[api.Output](ctx)
+results, err := graft.Execute(context.Background())
 if err != nil {
     log.Fatal(err)
 }
-// api is typed as api.Output; results map available for other node outputs
-config, err := graft.Result[config.Output](results)
+db := results["db"].(db.Output)
 ```
 
 ### Caching
