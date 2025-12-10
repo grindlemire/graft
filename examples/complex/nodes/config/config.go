@@ -9,7 +9,7 @@ import (
 	"github.com/grindlemire/graft/examples/complex/nodes/env"
 )
 
-const ID graft.ID = "config"
+const ID graft.ID = "cfg"
 
 type Output struct {
 	DBHost string
