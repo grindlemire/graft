@@ -11,20 +11,29 @@
   <a href="./examples"><img src="https://img.shields.io/badge/Examples-📂-green.svg?cacheSeconds=86400" alt="Examples"></a>
 </p>
 
-Lightweight dependency injection for Go. Just declare what each component needs and the engine handles execution order and parallelization.
+Lightweight, type-safe dependency injection for Go.
 
-## Why graft?
+```text
+Example Graph:
+                                    ┌───────┐
+                              ┌────▶│ cache │────┐
+                              │     └───────┘    │
+┌────────┐    ┌─────────┐     │                  │     ┌────────┐
+│ config │───▶│ secrets │─────┤                  ├────▶│ server │
+└────────┘    └─────────┘     │                  │     └────────┘
+                              │     ┌────┐       │
+                              └────▶│ db │───────┘
+                                    └────┘
+```
 
-Go's larger DI frameworks rely on reflection or heavy codegen. Graft takes a simpler approach: define nodes in their own packages, register them via `init()`, and let the engine figure out the rest. No reflection or code generation.
+You define independent nodes for your dependency graph. Graft assembles and runs your graph optimally, and gives you type-safe access to dependencies. No reflection or codegen and a minimal but flexible API.
 
-## Features
+## Why Graft?
 
-- **Type-safe nodes** — Generic `Node[T]` with compile-time type checking
-- **Declarative dependencies** — Nodes specify what they need, not how to get it
-- **Automatic parallelization** — Independent nodes run concurrently
-- **Subgraph execution** — Run only specific nodes and their transitive dependencies
-- **Node-level caching** — Cache expensive nodes across executions
-- **Static analysis** — Validate dependency declarations at test time
+- **Simple** - No complex arg routing even in large projects.
+- **Zero Magic** - Just standard Go. No reflection or code generation.
+- **Type Safe** - Compile-time type safety for inputs and outputs.
+- **Concurrent** - Independent nodes execute in parallel automatically.
 
 ## Install
 
@@ -32,186 +41,146 @@ Go's larger DI frameworks rely on reflection or heavy codegen. Graft takes a sim
 go get github.com/grindlemire/graft
 ```
 
+Full API documentation: [pkg.go.dev/github.com/grindlemire/graft](https://pkg.go.dev/github.com/grindlemire/graft)
+
 ## Usage
 
-### Define Nodes
+### 1. Define Nodes
 
-Each node lives in its own package with an `init()` that registers it:
-
-```go
-// nodes/config/config.go
-package config
-
-import (
-    "context"
-    "github.com/grindlemire/graft"
-)
-
-const ID graft.ID = "config"
-
-type Output struct {
-    DBHost string
-    Port   int
-}
-
-func init() {
-    graft.Register(graft.Node[Output]{
-        ID:        ID,
-        DependsOn: []graft.ID{},
-        Run:       run,
-    })
-}
-
-func run(ctx context.Context) (Output, error) {
-    return Output{DBHost: "localhost", Port: 8080}, nil
-}
-```
-
-Nodes declare dependencies and access them via `graft.Dep[T]`:
+Create a package for your node and register it in `init()`.
 
 ```go
 // nodes/db/db.go
 package db
 
+import (
+    "context"
+    "github.com/grindlemire/graft"
+    "myapp/nodes/config"
+)
+
+// the ID for this node
 const ID graft.ID = "db"
 
-type Output struct{ Pool *sql.DB }
+// what type you want to output from this node for others to consume
+type Output struct { Pool *sql.DB }
 
 func init() {
+    // register our node with graft for our output type
     graft.Register(graft.Node[Output]{
         ID:        ID,
+        // list any dependencies here (any cycles won't let you import it)
         DependsOn: []graft.ID{config.ID},
         Run:       run,
-        Cacheable: true,
     })
 }
 
+// run gets executed by graft to produce our output from our dependencies
 func run(ctx context.Context) (Output, error) {
+    // Type-safe dependency injection
     cfg, err := graft.Dep[config.Output](ctx)
     if err != nil {
         return Output{}, err
     }
-    pool, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%d", cfg.DBHost, cfg.Port))
-    if err != nil {
-        return Output{}, err
-    }
-    return Output{Pool: pool}, nil
+
+    return Output{Pool: connect(cfg)}, nil
 }
 ```
 
-### Execute the Graph
+### 2. Execute
 
-Import node packages for side-effect registration, then execute:
+Import your nodes for side-effects and run the engine.
 
 ```go
 package main
 
 import (
-    "context"
-    "log"
     "github.com/grindlemire/graft"
+    // import our nodes to register them
     _ "myapp/nodes/config"
     _ "myapp/nodes/db"
 )
 
 func main() {
-    // Run a specific node and its transitive dependencies
-    // dbOutput is typed as db.Output
-    dbOutput, results, err := graft.ExecuteFor[db.Output](context.Background())
+    // Run a specific subgraph
+    // Returns the typed output of the target node
+    db, results, err := graft.ExecuteFor[db.Output](ctx)
     if err != nil {
-        log.Fatal(err)
+         // handle error
     }
-    // The results map is available for other node outputs
-    cfg, _ := graft.Result[config.Output](results)
+
+    // OR run the entire graph
+    // results, err := graft.Execute(ctx)
 }
-```
-
-### Full Graph Execution
-
-To run every registered node:
-
-```go
-results, err := graft.Execute(context.Background())
-if err != nil {
-    log.Fatal(err)
-}
-db, _ := graft.Result[db.Output](results)
 ```
 
 ### Caching
 
-Mark nodes as cacheable to skip re-execution:
+Skip expensive calculations by marking nodes as cacheable.
 
 ```go
 graft.Register(graft.Node[Output]{
-    ID:        ID,
-    DependsOn: []graft.ID{},
-    Run:       run,
+    // ...
     Cacheable: true,
 })
 ```
 
-Cache options:
+Control cache behavior at runtime:
 
 ```go
-graft.Execute(ctx, graft.WithCache(myCache))    // custom cache
-graft.Execute(ctx, graft.IgnoreCache("config")) // force re-run specific nodes
-graft.Execute(ctx, graft.DisableCache())        // disable caching entirely
+graft.Execute(ctx, graft.WithCache(customCache))
+graft.Execute(ctx, graft.IgnoreCache(config.ID))
 ```
 
-## Dependency Validation
+### Validation
 
-Static analysis catches dependency mismatches at test time:
+Catch missing or unused dependencies during tests.
 
 ```go
-func TestNodeDependencies(t *testing.T) {
+func TestDeps(t *testing.T) {
     graft.AssertDepsValid(t, ".")
 }
 ```
 
-This catches using `Dep[T](ctx)` without declaring the dependency, or declaring unused dependencies.
+### Visualization
 
-## Visualizing the Graph
-
-### ASCII Diagram
+Generate diagrams directly from your code for better visibility in large code bases
 
 ```go
+// Print ASCII graph to stdout
 graft.PrintGraph(os.Stdout)
-```
 
-Output for `config → db → app`:
-
-```text
-                                   ┌────────┐
-                                   │ config │
-                                   └────────┘
-                                       ┌┘
-                                       │
-                                       ▼
-                                    ┌────┐
-                                    │ db │
-                                    └────┘
-                                       │
-                                       │
-                                       ▼
-                                    ┌─────┐
-                                    │ app │
-                                    └─────┘
-```
-
-### Mermaid Diagram
-
-```go
+// Generate Mermaid syntax
 graft.PrintMermaid(os.Stdout)
 ```
 
-```mermaid
-graph TD
-    config --> db
-    db --> app
-```
+## Why not Wire or Fx?
 
-Cacheable nodes are marked with `*` (ASCII) or styled with light blue fill (Mermaid).
+### Wire (Google)
+
+Wire uses code generation to wire dependencies at compile time. It's powerful but adds complexity:
+
+- Requires running `wire` before each build
+- Generated code can be hard to debug
+- Provider sets and injector functions add conceptual overhead
+
+Graft uses plain Go `init()` functions and generics. No extra build step for CI, no generated files to manage, and nothing new to learn.
+
+### Fx (Uber)
+
+Fx wires dependencies at runtime using reflection. It's flexible but has trade-offs:
+
+- Errors surface at runtime, not compile time
+- Reflection makes stack traces harder to follow
+- The lifecycle model (`fx.Invoke`, `fx.Lifecycle`) adds complexity and abstractions
+
+Graft resolves the graph at execution time but uses generics for type safety. If your types don't match, or you have a dependency cycle then the compiler tells you.
+
+### When to use Graft
+
+Graft is a good fit when you want dependency injection without the tooling overhead of Wire or the runtime reflection of Fx. It is also a much smaller and less complex library compared to either Wire or Fx with many less opinions on how you structure your code.
+
+Graft is intentionally minimal: define your nodes, declare your dependencies, and run.
 
 ## License
 
