@@ -156,17 +156,18 @@ graft.PrintMermaid(os.Stdout)
 
 ## Why not Wire or Fx?
 
-### Wire (Google)
+### [Wire](https://github.com/google/wire)
 
 Wire uses code generation to wire dependencies at compile time. It's powerful but adds complexity:
 
+- No longer maintained (archived as of 2025-08-25)
 - Requires running `wire` before each build
 - Generated code can be hard to debug
 - Provider sets and injector functions add conceptual overhead
 
 Graft uses plain Go `init()` functions and generics. No extra build step for CI, no generated files to manage, and nothing new to learn.
 
-### Fx (Uber)
+### [Fx](https://github.com/uber-go/fx)
 
 Fx wires dependencies at runtime using reflection. It's flexible but has trade-offs:
 
