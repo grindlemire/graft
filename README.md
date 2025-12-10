@@ -31,8 +31,8 @@ You define independent nodes for your dependency graph. Graft assembles and runs
 ## Why Graft?
 
 - **Simple** - No complex arg routing even in large projects.
-- **Zero Magic** - Just standard Go. No reflection or code generation.
-- **Type Safe** - Compile-time type safety for inputs and outputs.
+- **No Codegen** - No extra CI step.
+- **Type Safe** - Compile-time type safety for inputs and outputs and no reflection.
 - **Concurrent** - Independent nodes execute in parallel automatically.
 
 ## Install
