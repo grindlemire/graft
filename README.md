@@ -162,18 +162,17 @@ Wire uses code generation to wire dependencies at compile time. It's powerful bu
 
 - No longer maintained (archived as of 2025-08-25)
 - Requires running `wire` before each build
-- Generated code can be hard to debug
 - Provider sets and injector functions add conceptual overhead
 
 Graft uses plain Go `init()` functions and generics. No extra build step for CI, no generated files to manage, and nothing new to learn.
 
 ### [Fx](https://github.com/uber-go/fx)
 
-Fx wires dependencies at runtime using reflection. It's flexible but has trade-offs:
+Fx wires dependencies at runtime using reflection. It's actively maintained and heavily used at Uber, but has trade-offs:
 
 - Errors surface at runtime, not compile time
-- Reflection makes stack traces harder to follow
-- The lifecycle model (`fx.Invoke`, `fx.Lifecycle`) adds complexity and abstractions
+- Reflection can obscure stack traces, making debugging harder
+- The lifecycle model (`fx.Invoke`, `fx.Lifecycle`) adds a ton of boiler plate for most use cases
 
 Graft resolves the graph at execution time but uses generics for type safety. If your types don't match, or you have a dependency cycle then the compiler tells you.
 
