@@ -60,6 +60,10 @@ func (r AnalysisResult) String() string {
 	return fmt.Sprintf("%s (%s): %s", r.NodeID, r.File, strings.Join(parts, "; "))
 }
 
+// AnalyzeDirDebug controls whether AnalyzeDir prints debug information.
+// Set this to true before calling AssertDepsValidVerbose to see file-level tracing.
+var AnalyzeDirDebug = false
+
 // AnalyzeDir analyzes all Go files in a directory for dependency correctness.
 //
 // It recursively walks the directory, parsing each .go file (excluding _test.go)
@@ -83,18 +87,50 @@ func (r AnalysisResult) String() string {
 func AnalyzeDir(dir string) ([]AnalysisResult, error) {
 	var results []AnalysisResult
 
+	if AnalyzeDirDebug {
+		absDir, _ := filepath.Abs(dir)
+		fmt.Printf("[ANALYZE DEBUG] Walking directory: %s (abs: %s)\n", dir, absDir)
+	}
+
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			if AnalyzeDirDebug {
+				fmt.Printf("[ANALYZE DEBUG] Walk error at %s: %v\n", path, err)
+			}
 			return err
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if info.IsDir() {
+			if AnalyzeDirDebug {
+				fmt.Printf("[ANALYZE DEBUG] Entering directory: %s\n", path)
+			}
 			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			if AnalyzeDirDebug {
+				fmt.Printf("[ANALYZE DEBUG] Skipping test file: %s\n", path)
+			}
+			return nil
+		}
+
+		if AnalyzeDirDebug {
+			fmt.Printf("[ANALYZE DEBUG] Analyzing file: %s\n", path)
 		}
 
 		fileResults, err := AnalyzeFile(path)
 		if err != nil {
 			return fmt.Errorf("analyzing %s: %w", path, err)
 		}
+
+		if AnalyzeDirDebug {
+			fmt.Printf("[ANALYZE DEBUG]   Found %d node(s) in %s\n", len(fileResults), path)
+			for _, r := range fileResults {
+				fmt.Printf("[ANALYZE DEBUG]   - Node %q: declared=%v, used=%v\n", r.NodeID, r.DeclaredDeps, r.UsedDeps)
+			}
+		}
+
 		results = append(results, fileResults...)
 		return nil
 	})
@@ -118,10 +154,19 @@ func AnalyzeFile(path string) ([]AnalysisResult, error) {
 		return nil, err
 	}
 
+	// Build a map of function declarations for Run function reference resolution
+	funcDecls := make(map[string]*ast.FuncDecl)
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			funcDecls[fn.Name.Name] = fn
+		}
+	}
+
 	analyzer := &fileAnalyzer{
-		fset:    fset,
-		file:    path,
-		results: make([]AnalysisResult, 0),
+		fset:      fset,
+		file:      path,
+		funcDecls: funcDecls,
+		results:   make([]AnalysisResult, 0),
 	}
 
 	ast.Walk(analyzer, f)
@@ -129,11 +174,23 @@ func AnalyzeFile(path string) ([]AnalysisResult, error) {
 	return analyzer.results, nil
 }
 
+// AnalyzeFileDebug controls whether fileAnalyzer prints debug info about AST traversal.
+var AnalyzeFileDebug = false
+
 // fileAnalyzer is an ast.Visitor that finds graft.Node[T] definitions in a file.
 type fileAnalyzer struct {
-	fset    *token.FileSet
-	file    string
-	results []AnalysisResult
+	fset      *token.FileSet
+	file      string
+	funcDecls map[string]*ast.FuncDecl // function declarations in this file
+	results   []AnalysisResult
+}
+
+// getPackageNameAsID returns the package name (directory name) as the node ID.
+// This is used when the ID field references a constant like "ID: ID".
+func (a *fileAnalyzer) getPackageNameAsID(identName string) string {
+	// Use the directory name as the package name
+	dir := filepath.Dir(a.file)
+	return filepath.Base(dir)
 }
 
 // Visit implements ast.Visitor. It looks for composite literals of type
@@ -149,8 +206,22 @@ func (a *fileAnalyzer) Visit(n ast.Node) ast.Visitor {
 		return a
 	}
 
+	if AnalyzeFileDebug {
+		fmt.Printf("[AST DEBUG] Found CompositeLit in %s, type: %T\n", a.file, comp.Type)
+		if comp.Type != nil {
+			fmt.Printf("[AST DEBUG]   Type details: %#v\n", comp.Type)
+		}
+	}
+
 	if !a.isNodeType(comp) {
+		if AnalyzeFileDebug {
+			fmt.Printf("[AST DEBUG]   -> Not a Node type, skipping\n")
+		}
 		return a
+	}
+
+	if AnalyzeFileDebug {
+		fmt.Printf("[AST DEBUG]   -> IS a Node type, analyzing...\n")
 	}
 
 	result := a.analyzeNodeLiteral(comp)
@@ -205,30 +276,86 @@ func (a *fileAnalyzer) analyzeNodeLiteral(comp *ast.CompositeLit) *AnalysisResul
 
 	var nodeID string
 
+	if AnalyzeFileDebug {
+		fmt.Printf("[AST DEBUG]   analyzeNodeLiteral: %d elements in composite literal\n", len(comp.Elts))
+	}
+
 	for _, elt := range comp.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
+			if AnalyzeFileDebug {
+				fmt.Printf("[AST DEBUG]     element is not KeyValueExpr: %T\n", elt)
+			}
 			continue
 		}
 
 		key, ok := kv.Key.(*ast.Ident)
 		if !ok {
+			if AnalyzeFileDebug {
+				fmt.Printf("[AST DEBUG]     key is not Ident: %T\n", kv.Key)
+			}
 			continue
+		}
+
+		if AnalyzeFileDebug {
+			fmt.Printf("[AST DEBUG]     field %q: value type %T\n", key.Name, kv.Value)
 		}
 
 		switch key.Name {
 		case "ID":
+			// Handle string literal: ID: "mynode"
 			if lit, ok := kv.Value.(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				nodeID = strings.Trim(lit.Value, `"`)
+				if AnalyzeFileDebug {
+					fmt.Printf("[AST DEBUG]       ID = %q (from string literal)\n", nodeID)
+				}
+			} else if ident, ok := kv.Value.(*ast.Ident); ok {
+				// Handle identifier: ID: ID (where ID is a const)
+				// Use the package name as the node ID since the const is typically
+				// named "ID" and the package name is more meaningful
+				nodeID = a.getPackageNameAsID(ident.Name)
+				if AnalyzeFileDebug {
+					fmt.Printf("[AST DEBUG]       ID = %q (from identifier %q, using package name)\n", nodeID, ident.Name)
+				}
+			} else if AnalyzeFileDebug {
+				fmt.Printf("[AST DEBUG]       ID value is not a string literal or identifier: %T\n", kv.Value)
 			}
 		case "DependsOn":
 			na.extractDependsOn(kv.Value)
+			if AnalyzeFileDebug {
+				fmt.Printf("[AST DEBUG]       DependsOn extracted: %v\n", na.declaredDeps)
+			}
 		case "Run":
-			ast.Walk(na, kv.Value)
+			// Handle inline function literals
+			if _, ok := kv.Value.(*ast.FuncLit); ok {
+				ast.Walk(na, kv.Value)
+				if AnalyzeFileDebug {
+					fmt.Printf("[AST DEBUG]       Run (inline func): usedDeps: %v\n", na.usedDeps)
+				}
+			} else if ident, ok := kv.Value.(*ast.Ident); ok {
+				// Handle function reference: Run: run
+				// Look up the function declaration in this file
+				if fn, found := a.funcDecls[ident.Name]; found {
+					if AnalyzeFileDebug {
+						fmt.Printf("[AST DEBUG]       Run references func %q, walking its body\n", ident.Name)
+					}
+					ast.Walk(na, fn.Body)
+					if AnalyzeFileDebug {
+						fmt.Printf("[AST DEBUG]       Run usedDeps: %v\n", na.usedDeps)
+					}
+				} else if AnalyzeFileDebug {
+					fmt.Printf("[AST DEBUG]       Run references func %q but not found in file\n", ident.Name)
+				}
+			} else if AnalyzeFileDebug {
+				fmt.Printf("[AST DEBUG]       Run value type %T not handled\n", kv.Value)
+			}
 		}
 	}
 
 	if nodeID == "" {
+		if AnalyzeFileDebug {
+			fmt.Printf("[AST DEBUG]   -> nodeID is empty, returning nil\n")
+		}
 		return nil
 	}
 
@@ -280,8 +407,9 @@ func (a *nodeAnalyzer) Visit(n ast.Node) ast.Visitor {
 }
 
 // extractDependsOn extracts declared dependencies from a DependsOn field value.
-// Handles string literals, identifiers, and selector expressions.
+// Handles string literals, identifiers, selector expressions, and call expressions.
 // For selector expressions like pkg.ID, the package name is used as the dependency.
+// For call expressions like graft.ID("foo"), the string argument is used.
 func (a *nodeAnalyzer) extractDependsOn(n ast.Node) {
 	switch v := n.(type) {
 	case *ast.CompositeLit:
@@ -303,12 +431,45 @@ func (a *nodeAnalyzer) extractDependsOn(n ast.Node) {
 			// Handle identifiers (local constants)
 			if ident, ok := elt.(*ast.Ident); ok {
 				a.declaredDeps[ident.Name] = true
+				continue
+			}
+			// Handle call expressions like graft.ID("foo") or ID("foo")
+			if call, ok := elt.(*ast.CallExpr); ok {
+				a.extractFromCall(call)
 			}
 		}
 	case *ast.CallExpr:
 		// Handle cases like []graft.ID{nodeA.ID, nodeB.ID} or function calls
 		for _, arg := range v.Args {
 			a.extractDependsOn(arg)
+		}
+	}
+}
+
+// extractFromCall extracts dependency ID from a call expression like graft.ID("foo").
+func (a *nodeAnalyzer) extractFromCall(call *ast.CallExpr) {
+	// Check if this is graft.ID(...) or ID(...)
+	isIDCall := false
+
+	switch fn := call.Fun.(type) {
+	case *ast.Ident:
+		// ID("foo")
+		isIDCall = fn.Name == "ID"
+	case *ast.SelectorExpr:
+		// graft.ID("foo")
+		if ident, ok := fn.X.(*ast.Ident); ok {
+			isIDCall = ident.Name == "graft" && fn.Sel.Name == "ID"
+		}
+	}
+
+	if isIDCall && len(call.Args) > 0 {
+		// Extract the string argument
+		if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+			dep := strings.Trim(lit.Value, `"`)
+			a.declaredDeps[dep] = true
+			if AnalyzeFileDebug {
+				fmt.Printf("[AST DEBUG]         extracted %q from call expression\n", dep)
+			}
 		}
 	}
 }

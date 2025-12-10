@@ -1,6 +1,30 @@
 package graft
 
-import "testing"
+import (
+	"sort"
+	"testing"
+)
+
+// AssertOpts configures the behavior of AssertDepsValid.
+type AssertOpts struct {
+	Verbose bool // prints node summaries (DeclaredDeps, UsedDeps, Status)
+	Debug   bool // prints AST-level tracing (file walking, composite literals, etc.)
+}
+
+// AssertOption is a functional option for configuring AssertDepsValid.
+type AssertOption func(*AssertOpts)
+
+// WithVerboseTesting enables verbose output showing each node's declared and used
+// dependencies along with their validation status.
+func WithVerboseTesting() AssertOption {
+	return func(o *AssertOpts) { o.Verbose = true }
+}
+
+// WithDebugTesting enables AST-level debug output showing file walking,
+// composite literal detection, and dependency extraction details.
+func WithDebugTesting() AssertOption {
+	return func(o *AssertOpts) { o.Debug = true }
+}
 
 // AssertDepsValid is a test helper that validates all graft.Node dependency
 // declarations in the specified directory match their actual usage.
@@ -19,22 +43,69 @@ import "testing"
 //	    graft.AssertDepsValid(t, ".")
 //	}
 //
-// For a specific subdirectory:
+// With verbose output (shows each node's deps):
 //
 //	func TestNodeDependencies(t *testing.T) {
-//	    graft.AssertDepsValid(t, "./nodes")
+//	    graft.AssertDepsValid(t, ".", graft.WithVerbose())
+//	}
+//
+// With AST debug output:
+//
+//	func TestNodeDependencies(t *testing.T) {
+//	    graft.AssertDepsValid(t, ".", graft.WithDebug())
 //	}
 //
 // Example failure output:
 //
 //	graft.AssertDepsValid: db (nodes/db/db.go): undeclared deps: [cache]
 //	  → node "db" uses Dep[cache.Output](ctx) but does not declare "cache" in DependsOn
-func AssertDepsValid(t testing.TB, dir string) {
+func AssertDepsValid(t testing.TB, dir string, opts ...AssertOption) {
 	t.Helper()
+
+	cfg := &AssertOpts{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	// Enable AST-level debug flags if requested
+	if cfg.Debug {
+		AnalyzeDirDebug = true
+		AnalyzeFileDebug = true
+		defer func() {
+			AnalyzeDirDebug = false
+			AnalyzeFileDebug = false
+		}()
+	}
 
 	results, err := AnalyzeDir(dir)
 	if err != nil {
 		t.Fatalf("graft.AssertDepsValid: failed to analyze directory %q: %v", dir, err)
+	}
+
+	// Verbose output: show each node's dependency summary
+	if cfg.Verbose {
+		t.Logf("graft.AssertDepsValid: analyzing %q - found %d node(s)", dir, len(results))
+		for _, r := range results {
+			sortedDeclared := make([]string, len(r.DeclaredDeps))
+			copy(sortedDeclared, r.DeclaredDeps)
+			sort.Strings(sortedDeclared)
+
+			sortedUsed := make([]string, len(r.UsedDeps))
+			copy(sortedUsed, r.UsedDeps)
+			sort.Strings(sortedUsed)
+
+			t.Logf("─────────────────────────────────────────")
+			t.Logf("Node: %q (%s)", r.NodeID, r.File)
+			t.Logf("  DeclaredDeps (from DependsOn): %v", sortedDeclared)
+			t.Logf("  UsedDeps (from Dep[T] calls):  %v", sortedUsed)
+			if r.HasIssues() {
+				t.Logf("  Undeclared (used but not declared): %v", r.Undeclared)
+				t.Logf("  Unused (declared but not used):     %v", r.Unused)
+			} else {
+				t.Logf("  Status: OK")
+			}
+		}
+		t.Logf("─────────────────────────────────────────")
 	}
 
 	var failed bool
@@ -59,7 +130,7 @@ func AssertDepsValid(t testing.TB, dir string) {
 		}
 	}
 
-	if !failed && len(results) > 0 {
+	if !failed && len(results) > 0 && !cfg.Verbose {
 		t.Logf("graft.AssertDepsValid: validated %d node(s) - all dependencies correct", len(results))
 	}
 }

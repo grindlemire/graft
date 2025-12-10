@@ -11,7 +11,6 @@ import (
 
 	// Import nodes for side-effect registration
 	"github.com/grindlemire/graft/examples/diamond/nodes/api"
-	_ "github.com/grindlemire/graft/examples/diamond/nodes/api"
 	_ "github.com/grindlemire/graft/examples/diamond/nodes/cache"
 	_ "github.com/grindlemire/graft/examples/diamond/nodes/config"
 	_ "github.com/grindlemire/graft/examples/diamond/nodes/db"

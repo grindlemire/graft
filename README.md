@@ -34,6 +34,7 @@ You define independent nodes for your dependency graph. Graft assembles and runs
 - **No Codegen** - No extra build step or opaque code.
 - **Type Safe** - Compile-time type safety for inputs and outputs and no reflection.
 - **Concurrent** - Independent nodes execute in parallel automatically.
+- **Validatable** - Validate your entire graph in [CI and compile time](#validation)
 
 ## Install
 
@@ -141,6 +142,15 @@ func TestDeps(t *testing.T) {
     graft.AssertDepsValid(t, ".")
 }
 ```
+
+#### Compile Time Graph Checking
+
+Place each node in its own package and Go's import rules enforce a valid graph for you:
+
+- **No cycles** - To depend on node `B`, node `A` must import `B`'s package. Circular imports don't compile.
+- **No missing deps** - Referencing `config.ID` in your `DependsOn` requires importing the config package. If it doesn't exist, the build fails.
+
+See the [examples](./examples) directory for this pattern.
 
 ### Visualization
 
