@@ -2,17 +2,24 @@
 
 Demonstrates wide parallelization where a single root node fans out to many parallel workers, then converges to an aggregator.
 
-## Dependency Tree
+## Dependency Graph
 
-```
-              config
-         /   /  |  \   \
-        ▼   ▼   ▼   ▼   ▼
-      svc1 svc2 svc3 svc4 svc5
-        \   \   |   /   /
-         \   \  |  /   /
-          ▼   ▼ ▼ ▼   ▼
-           aggregator
+```text
+                   ┌────────┐
+                   │ config │
+                   └────────┘
+    ┌─────────┬─────────┼─────────┬─────────┐
+    │         │         │         │         │
+    ▼         ▼         ▼         ▼         ▼
+┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐
+│ svc1 │  │ svc2 │  │ svc3 │  │ svc4 │  │ svc5 │
+└──────┘  └──────┘  └──────┘  └──────┘  └──────┘
+    └─────────┴─────────┼─────────┴─────────┘
+                        │
+                        ▼
+                 ┌────────────┐
+                 │ aggregator │
+                 └────────────┘
 ```
 
 ## What It Demonstrates
@@ -29,9 +36,16 @@ cd examples/fanout
 go run .
 ```
 
+## Run Tests
+
+```bash
+cd examples/fanout
+go test -v
+```
+
 ## Expected Output
 
-```
+```text
 [config] Loading configuration...
 [config] Done
 [svc1] Processing...  [svc2] Processing...  [svc3] Processing...  [svc4] Processing...  [svc5] Processing...
@@ -52,4 +66,3 @@ Sequential would be: ~1020ms
 
 With 5 services each taking ~200ms, sequential execution would take ~1 second.
 With parallel execution, all 5 run simultaneously, so the middle tier only takes as long as the slowest service (~220ms).
-

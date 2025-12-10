@@ -2,22 +2,36 @@
 
 A realistic multi-level dependency graph with shared dependencies, multiple convergence points, and varied parallelization.
 
-## Dependency Tree
+## Dependency Graph
 
-```
-                 env
-              /   |   \
-             ▼    ▼    ▼
-         config secrets logger
-            |      \    /
-            ▼       ▼  ▼
-           db       auth
-            \      /    \
-             ▼    ▼      ▼
-             user      admin
-               \        /
-                ▼      ▼
-                gateway
+```text
+            ┌─────┐
+            │ env │
+            └─────┘
+   ┌──────────┬┴──────────┐
+   │          │           │
+   ▼          ▼           ▼
+┌─────┐  ┌────────┐  ┌─────────┐
+│ cfg │  │ logger │  │ secrets │
+└─────┘  └────────┘  └─────────┘
+   └───────┬──┴─────┬─────┘
+           │        │
+           ▼        ▼
+       ┌──────┐  ┌────┐
+       │ auth │  │ db │
+       └──────┘  └────┘
+          ┌┴────────┘┐
+          │          │
+          ▼          ▼
+      ┌───────┐  ┌──────┐
+      │ admin │  │ user │
+      └───────┘  └──────┘
+          └────┬─────┘
+               │
+               ▼
+          ┌─────────┐
+          │ gateway │
+          └─────────┘
 ```
 
 ## Execution Levels
@@ -42,11 +56,18 @@ cd examples/complex
 go run .
 ```
 
+## Run Tests
+
+```bash
+cd examples/complex
+go test -v
+```
+
 ## Expected Output
 
 The output shows the layered execution:
 
-```
+```text
 [env] Loading environment...
 [env] Done
 [config] Loading...  [secrets] Loading...  [logger] Initializing...
@@ -70,4 +91,3 @@ Sequential would be: ~950ms
 ## Key Insight
 
 Even though there are 9 nodes, the execution only takes 5 "levels" of time because nodes at the same level run concurrently.
-

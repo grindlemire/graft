@@ -2,16 +2,12 @@
 
 A minimal example demonstrating the basic graft pattern with a linear dependency chain.
 
-## Dependency Tree
+## Dependency Graph
 
-```bash
-config
-   │
-   ▼
-   db
-   │
-   ▼
-  app
+```text
+┌────────┐    ┌────┐    ┌─────┐
+│ config │───▶│ db │───▶│ app │
+└────────┘    └────┘    └─────┘
 ```
 
 Each node depends on exactly one other node, forming a simple sequential chain. This is the simplest possible graft setup.
@@ -30,9 +26,16 @@ cd examples/simple
 go run .
 ```
 
-## Expected Output
+## Run Tests
 
 ```bash
+cd examples/simple
+go test -v
+```
+
+## Expected Output
+
+```text
 [config] Loading configuration...
 [config] Done
 [db] Connecting to database at localhost:5432...

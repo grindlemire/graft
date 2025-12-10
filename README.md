@@ -34,7 +34,7 @@ You define independent nodes for your dependency graph. Graft assembles and runs
 - **No Codegen** - No extra build step or opaque code.
 - **Type Safe** - Compile-time type safety for inputs and outputs and no reflection.
 - **Concurrent** - Independent nodes execute in parallel automatically.
-- **Validatable** - Validate your entire graph in [CI and compile time](#validation)
+- **Validatable** - Validate your entire graph in [CI and at compile time](#validation)
 
 ## Install
 

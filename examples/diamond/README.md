@@ -2,16 +2,22 @@
 
 Demonstrates the classic diamond dependency pattern where two nodes run in parallel and then converge.
 
-## Dependency Tree
+## Dependency Graph
 
-```
-    config
-    /    \
-   ▼      ▼
-  db    cache
-   \      /
-    ▼    ▼
-     api
+```text
+         ┌────────┐
+         │ config │
+         └───┬────┘
+        ┌────┴────┐
+        ▼         ▼
+     ┌────┐   ┌───────┐
+     │ db │   │ cache │
+     └──┬─┘   └───┬───┘
+        └────┬────┘
+             ▼
+         ┌─────┐
+         │ api │
+         └─────┘
 ```
 
 ## What It Demonstrates
@@ -28,9 +34,16 @@ cd examples/diamond
 go run .
 ```
 
+## Run Tests
+
+```bash
+cd examples/diamond
+go test -v
+```
+
 ## Expected Output
 
-```
+```text
 [config] Loading configuration...
 [config] Done (100ms)
 [db] Connecting to database...       [cache] Connecting to Redis...
@@ -43,7 +56,7 @@ Total: ~550ms (not 650ms, because db and cache ran in parallel)
 ```
 
 The key observation is that total execution time is approximately:
+
 - config (100ms) + max(db, cache) (200ms) + api (100ms) = ~400ms
 
 Not the sequential sum of all nodes (~550ms), proving parallel execution.
-

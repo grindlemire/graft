@@ -4,22 +4,25 @@ Demonstrates using graft's node-level caching for HTTP servers where global reso
 
 ## Dependency Graph
 
-```
-        config (cached)
-           │
-    ┌──────┴──────┐
-    ▼             ▼
-   db          admin
- (cached)    (per-request)
-    │             │
-    ▼             │
-  user ◀──────────┤
-(per-request)     │
-    │             │
-    └─────┬───────┘
+```text
+              ┌────────┐
+              │ config │ (cached)
+              └───┬────┘
+          ┌───────┴───────┐
+          ▼               ▼
+       ┌────┐         ┌───────┐
+       │ db │         │ admin │
+       └──┬─┘         └───┬───┘
+          │  (cached)     │ (per-request)
+          ▼               │
+       ┌──────┐           │
+       │ user │◀──────────┘
+       └──┬───┘ (per-request)
+          │
           ▼
-   request_logger
-    (per-request)
+   ┌────────────────┐
+   │ request_logger │ (per-request)
+   └────────────────┘
 ```
 
 ## How It Works
@@ -37,9 +40,10 @@ graft.Register(graft.Node[Output]{
 
 Request-scoped nodes omit `Cacheable` and run fresh every time.
 
-## Running
+## Run It
 
 ```bash
+cd examples/httpserver
 go run .
 ```
 
@@ -51,9 +55,16 @@ curl http://localhost:8080/user/456
 curl http://localhost:8080/stats
 ```
 
+## Run Tests
+
+```bash
+cd examples/httpserver
+go test -v
+```
+
 ## Expected Behavior
 
-```
+```text
 === Request req-1: GET /user/123 ===
 [config] Executing (execution #1)
 [db] Connecting (execution #1)
