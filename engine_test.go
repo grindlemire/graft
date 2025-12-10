@@ -665,12 +665,13 @@ func TestWithCacheOption(t *testing.T) {
 
 	nodes := map[ID]node{
 		"counter": node{
-		id:        "counter",
-		dependsOn: nil,
-		cacheable: true,
-		run: func(ctx context.Context) (any, error) {
-			execCount.Add(1)
-			return "executed", nil
+			id:        "counter",
+			dependsOn: nil,
+			cacheable: true,
+			run: func(ctx context.Context) (any, error) {
+				execCount.Add(1)
+				return "executed", nil
+			},
 		},
 	}
 
