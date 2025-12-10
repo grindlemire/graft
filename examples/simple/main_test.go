@@ -8,6 +8,6 @@ import (
 
 func TestMyGraph(t *testing.T) {
 	graft.AssertDepsValid(t, ".")
-	// You can also use WithVerbose() to get more detailed output
-	// graft.AssertDepsValid(t, ".", graft.WithVerbose())
+	// You can also use WithVerboseTesting() to get more detailed output
+	// graft.AssertDepsValid(t, ".", graft.WithVerboseTesting())
 }

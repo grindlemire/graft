@@ -46,13 +46,13 @@ func WithDebugTesting() AssertOption {
 // With verbose output (shows each node's deps):
 //
 //	func TestNodeDependencies(t *testing.T) {
-//	    graft.AssertDepsValid(t, ".", graft.WithVerbose())
+//	    graft.AssertDepsValid(t, ".", graft.WithVerboseTesting())
 //	}
 //
 // With AST debug output:
 //
 //	func TestNodeDependencies(t *testing.T) {
-//	    graft.AssertDepsValid(t, ".", graft.WithDebug())
+//	    graft.AssertDepsValid(t, ".", graft.WithDebugTesting())
 //	}
 //
 // Example failure output:

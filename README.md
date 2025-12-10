@@ -143,6 +143,28 @@ func TestDeps(t *testing.T) {
 }
 ```
 
+Options for more detail:
+
+```go
+// Verbose output - shows each node's declared and used dependencies
+graft.AssertDepsValid(t, ".", graft.WithVerboseTesting())
+
+// Debug output - shows AST-level tracing for troubleshooting
+graft.AssertDepsValid(t, ".", graft.WithDebugTesting())
+```
+
+For programmatic access (CI integration, custom reporting):
+
+```go
+results, err := graft.CheckDepsValid("./nodes")
+for _, r := range results {
+    if r.HasIssues() {
+        // r.Undeclared - deps used but not declared
+        // r.Unused - deps declared but not used
+    }
+}
+```
+
 #### Compile Time Graph Checking
 
 Place each node in its own package and Go's import rules enforce a valid graph for you:
