@@ -19,7 +19,7 @@ type config struct {
 //
 // Example:
 //
-//	results, err := graft.Execute(ctx, graft.WithRegistry(customNodes))
+//	out, _, err := graft.ExecuteFor[app.Output](ctx, graft.WithRegistry(customNodes))
 func WithRegistry(registry map[ID]node) Option {
 	return func(c *config) {
 		c.registry = registry
@@ -35,7 +35,7 @@ func WithRegistry(registry map[ID]node) Option {
 // Example:
 //
 //	// Override just the "db" node for testing
-//	results, err := graft.Execute(ctx, graft.MergeRegistry(mockNodes))
+//	out, _, err := graft.ExecuteFor[app.Output](ctx, graft.MergeRegistry(mockNodes))
 func MergeRegistry(registry map[ID]node) Option {
 	return func(c *config) {
 		merged := Registry()
@@ -57,7 +57,7 @@ func MergeRegistry(registry map[ID]node) Option {
 //
 //	// Use a custom cache instead of the global default
 //	customCache := graft.NewMemoryCache()
-//	results, _ := graft.Execute(ctx, graft.WithCache(customCache))
+//	out, _, err := graft.ExecuteFor[app.Output](ctx, graft.WithCache(customCache))
 func WithCache(cache Cache) Option {
 	return func(c *config) {
 		c.cache = cache
@@ -74,7 +74,7 @@ func WithCache(cache Cache) Option {
 // Example:
 //
 //	// Re-fetch config even though it's cacheable
-//	results, err := graft.Execute(ctx,
+//	out, _, err := graft.ExecuteFor[app.Output](ctx,
 //	    graft.WithCache(cache),
 //	    graft.IgnoreCache("config"),
 //	)
@@ -94,7 +94,7 @@ func IgnoreCache(ids ...ID) Option {
 // Example:
 //
 //	// Disable the use of the default global cache
-//	results, err := graft.Execute(ctx, graft.DisableCache())
+//	out, _, err := graft.ExecuteFor[app.Output](ctx, graft.DisableCache())
 func DisableCache() Option {
 	return func(cfg *config) {
 		cfg.cache = nil
@@ -143,7 +143,7 @@ func PatchValue[T any](value T) Option {
 // Example:
 //
 //	// Replace db node with a mock that uses config
-//	results, err := graft.Execute(ctx,
+//	out, _, err := graft.ExecuteFor[app.Output](ctx,
 //	    graft.Patch[db.Output](graft.Node[db.Output]{
 //	        DependsOn: []graft.ID{"config"},
 //	        Run: func(ctx context.Context) (db.Output, error) {
@@ -170,7 +170,9 @@ func Patch[T any](n Node[T]) Option {
 	}
 }
 
-// Execute runs all registered nodes and returns their results.
+// Execute runs all registered nodes and returns their results. Note that Execute
+// is not type safe since it is executing the entire graph and exposing all the
+// results. Use ExecuteFor instead to have a type safe output.
 //
 // Nodes are executed in topological order with automatic parallelization.
 // Nodes at the same dependency level run concurrently.

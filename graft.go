@@ -28,13 +28,13 @@
 //	    },
 //	})
 //
-// Execute the graph:
+// Execute for a specific node (returns typed output):
 //
-//	results, err := graft.Execute(ctx)
+//	db, _, err := graft.ExecuteFor[*sql.DB](ctx)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//	db := results["db"].(*sql.DB)
+//	// db is already typed as *sql.DB
 //
 // # Type Safety
 //
