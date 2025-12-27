@@ -101,8 +101,14 @@ var node = graft.Node[string]{
 			wantNodes:  1,
 			wantIssues: 1,
 			checkResult: func(t *testing.T, results []AnalysisResult) {
-				if len(results[0].Unused) != 1 || results[0].Unused[0] != "dep2" {
-					t.Errorf("expected unused dep2, got %v", results[0].Unused)
+				// With canonical forms, dep2.ID becomes "myapp/nodes/dep2.ID"
+				if len(results[0].Unused) != 1 {
+					t.Errorf("expected 1 unused dep, got %d: %v", len(results[0].Unused), results[0].Unused)
+				}
+				// Check that dep2 is reported (either as "dep2" or canonical form)
+				unused := results[0].Unused[0]
+				if unused != "dep2" && unused != "myapp/nodes/dep2.ID" {
+					t.Errorf("expected unused dep2 (or myapp/nodes/dep2.ID), got %v", results[0].Unused)
 				}
 			},
 		},
@@ -924,6 +930,358 @@ func (d dep1Output) String() string { return "" }
 	// Should detect dep1Output usage with local Dep call
 	if len(results[0].UsedDeps) != 1 {
 		t.Errorf("got %d used deps, want 1: %v", len(results[0].UsedDeps), results[0].UsedDeps)
+	}
+}
+
+// TestSharedInterfacePackage tests that Dep[T] calls resolve to the correct node IDs
+// when multiple nodes in one package output different types, and another node depends on them.
+// This tests the bug where the analyzer incorrectly infers dependency IDs from the package name
+// of the type argument (e.g., Dep[ports.Executor] -> "ports") instead of resolving to the
+// actual node ID that outputs that type (e.g., "executor").
+func TestSharedInterfacePackage(t *testing.T) {
+	results, err := AnalyzeDir("testcases/sharedinterface")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	// Find the app node
+	var appResult *AnalysisResult
+	for i := range results {
+		if results[i].NodeID == "app" {
+			appResult = &results[i]
+			break
+		}
+	}
+	if appResult == nil {
+		t.Fatalf("app node not found in results. Got node IDs: %v", func() []string {
+			ids := make([]string, len(results))
+			for i := range results {
+				ids[i] = results[i].NodeID
+			}
+			return ids
+		}())
+	}
+
+	// Check that used deps are "executor" and "logger", NOT "ports" (the package name)
+	usedDepsMap := make(map[string]bool)
+	for _, dep := range appResult.UsedDeps {
+		usedDepsMap[dep] = true
+	}
+
+	if !usedDepsMap["executor"] {
+		t.Errorf("expected 'executor' in used deps, got %v", appResult.UsedDeps)
+	}
+	if !usedDepsMap["logger"] {
+		t.Errorf("expected 'logger' in used deps, got %v", appResult.UsedDeps)
+	}
+
+	// "ports" (the package name of the type argument) should NOT be detected as a used dep
+	if usedDepsMap["ports"] {
+		t.Errorf("'ports' should not be in used deps (it's the interface package, not a node ID), got %v", appResult.UsedDeps)
+	}
+
+	// The node should have no issues - all deps are properly declared
+	if appResult.HasIssues() {
+		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
+			appResult.Undeclared, appResult.Unused)
+	}
+}
+
+// TestSharedPackageWithImportAlias tests that Dep[T] calls resolve correctly
+// when using a custom import alias for the dependency package.
+func TestSharedPackageWithImportAlias(t *testing.T) {
+	results, err := AnalyzeDir("testcases/importaliases")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	var appResult *AnalysisResult
+	for i := range results {
+		if results[i].NodeID == "app" {
+			appResult = &results[i]
+			break
+		}
+	}
+	if appResult == nil {
+		t.Fatalf("app node not found")
+	}
+
+	// Should resolve svc.DBConnection to "database-service", not "svc" (the alias)
+	usedDepsMap := make(map[string]bool)
+	for _, dep := range appResult.UsedDeps {
+		usedDepsMap[dep] = true
+	}
+
+	if !usedDepsMap["database-service"] {
+		t.Errorf("expected 'database-service' in used deps, got %v", appResult.UsedDeps)
+	}
+
+	// "svc" (the alias) should NOT be detected as a used dep
+	if usedDepsMap["svc"] {
+		t.Errorf("'svc' should not be in used deps (it's an alias), got %v", appResult.UsedDeps)
+	}
+
+	if appResult.HasIssues() {
+		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
+			appResult.Undeclared, appResult.Unused)
+	}
+}
+
+// TestNodeIDVariableNameDoesNotMatter tests that the variable name used
+// to store the node ID constant doesn't affect dependency resolution.
+func TestNodeIDVariableNameDoesNotMatter(t *testing.T) {
+	results, err := AnalyzeDir("testcases/iddeclarations")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	var consumerResult *AnalysisResult
+	for i := range results {
+		if results[i].NodeID == "consumer" {
+			consumerResult = &results[i]
+			break
+		}
+	}
+	if consumerResult == nil {
+		t.Fatalf("consumer node not found")
+	}
+
+	if consumerResult.HasIssues() {
+		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
+			consumerResult.Undeclared, consumerResult.Unused)
+	}
+}
+
+// TestMultipleNodesInPackageWithDifferentIDPatterns tests resolution when
+// multiple nodes in the same package use different ID declaration patterns.
+func TestMultipleNodesInPackageWithDifferentIDPatterns(t *testing.T) {
+	results, err := AnalyzeDir("testcases/iddeclarations")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	var appResult *AnalysisResult
+	for i := range results {
+		if results[i].NodeID == "app" {
+			appResult = &results[i]
+			break
+		}
+	}
+	if appResult == nil {
+		t.Fatalf("app node not found")
+	}
+
+	usedDepsMap := make(map[string]bool)
+	for _, dep := range appResult.UsedDeps {
+		usedDepsMap[dep] = true
+	}
+
+	// All three dependencies should be resolved to their actual IDs
+	expectedDeps := []string{"cache-node", "database-node", "logger-node"}
+	for _, expected := range expectedDeps {
+		if !usedDepsMap[expected] {
+			t.Errorf("expected '%s' in used deps, got %v", expected, appResult.UsedDeps)
+		}
+	}
+
+	// "shared" (the package name) should NOT appear
+	if usedDepsMap["shared"] {
+		t.Errorf("'shared' should not be in used deps, got %v", appResult.UsedDeps)
+	}
+
+	if appResult.HasIssues() {
+		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
+			appResult.Undeclared, appResult.Unused)
+	}
+}
+
+// TestDeepNestedImportPath tests that deeply nested import paths resolve correctly.
+func TestDeepNestedImportPath(t *testing.T) {
+	results, err := AnalyzeDir("testcases/importpaths")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	var handlerResult *AnalysisResult
+	for i := range results {
+		if results[i].NodeID == "handler" {
+			handlerResult = &results[i]
+			break
+		}
+	}
+	if handlerResult == nil {
+		t.Fatalf("handler node not found")
+	}
+
+	usedDepsMap := make(map[string]bool)
+	for _, dep := range handlerResult.UsedDeps {
+		usedDepsMap[dep] = true
+	}
+
+	if !usedDepsMap["oauth-provider"] {
+		t.Errorf("expected 'oauth-provider' in used deps, got %v", handlerResult.UsedDeps)
+	}
+
+	// "providers" (the package name) should NOT appear
+	if usedDepsMap["providers"] {
+		t.Errorf("'providers' should not be in used deps, got %v", handlerResult.UsedDeps)
+	}
+
+	if handlerResult.HasIssues() {
+		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
+			handlerResult.Undeclared, handlerResult.Unused)
+	}
+}
+
+// TestMultipleImportAliasesSamePackage tests that the analyzer handles
+// when the same package is (hypothetically) imported with different aliases in different files.
+// This simulates the case where node resolution must work across files with different import styles.
+func TestMultipleImportAliasesSamePackage(t *testing.T) {
+	results, err := AnalyzeDir("testcases/importaliases")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	// Check both consumers
+	for _, consumerID := range []string{"consumer1", "consumer2"} {
+		var result *AnalysisResult
+		for i := range results {
+			if results[i].NodeID == consumerID {
+				result = &results[i]
+				break
+			}
+		}
+		if result == nil {
+			t.Fatalf("%s node not found", consumerID)
+		}
+
+		usedDepsMap := make(map[string]bool)
+		for _, dep := range result.UsedDeps {
+			usedDepsMap[dep] = true
+		}
+
+		if !usedDepsMap["config-node"] {
+			t.Errorf("%s: expected 'config-node' in used deps, got %v", consumerID, result.UsedDeps)
+		}
+
+		// Neither alias should appear
+		if usedDepsMap["t"] || usedDepsMap["apptypes"] || usedDepsMap["types"] {
+			t.Errorf("%s: aliases/package name should not be in used deps, got %v", consumerID, result.UsedDeps)
+		}
+
+		if result.HasIssues() {
+			t.Errorf("%s: expected no issues, but got: undeclared=%v, unused=%v",
+				consumerID, result.Undeclared, result.Unused)
+		}
+	}
+}
+
+// TestDependsOnWithDifferentIDFormats tests that DependsOn declarations work
+// with various formats: string literals, pkg.ID constants, and graft.ID() calls.
+func TestDependsOnWithDifferentIDFormats(t *testing.T) {
+	results, err := AnalyzeDir("testcases/dependencyformats")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	var appResult *AnalysisResult
+	for i := range results {
+		if results[i].NodeID == "app" {
+			appResult = &results[i]
+			break
+		}
+	}
+	if appResult == nil {
+		t.Fatalf("app node not found")
+	}
+
+	if appResult.HasIssues() {
+		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
+			appResult.Undeclared, appResult.Unused)
+	}
+
+	// Verify both declared deps are found (in some canonical form)
+	if len(appResult.DeclaredDeps) != 2 {
+		t.Errorf("expected 2 declared deps, got %d: %v", len(appResult.DeclaredDeps), appResult.DeclaredDeps)
+	}
+
+	if len(appResult.UsedDeps) != 2 {
+		t.Errorf("expected 2 used deps, got %d: %v", len(appResult.UsedDeps), appResult.UsedDeps)
+	}
+}
+
+// TestSameTypeNameDifferentPackages tests that the analyzer correctly distinguishes
+// between types with the same name but from different packages.
+func TestSameTypeNameDifferentPackages(t *testing.T) {
+	results, err := AnalyzeDir("testcases/typeresolution")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	var consumerResult *AnalysisResult
+	for i := range results {
+		if results[i].NodeID == "consumer" {
+			consumerResult = &results[i]
+			break
+		}
+	}
+	if consumerResult == nil {
+		t.Fatalf("consumer node not found")
+	}
+
+	usedDepsMap := make(map[string]bool)
+	for _, dep := range consumerResult.UsedDeps {
+		usedDepsMap[dep] = true
+	}
+
+	// Should resolve to the correct node IDs, not package names
+	if !usedDepsMap["pkg1-output"] {
+		t.Errorf("expected 'pkg1-output' in used deps, got %v", consumerResult.UsedDeps)
+	}
+	if !usedDepsMap["pkg2-output"] {
+		t.Errorf("expected 'pkg2-output' in used deps, got %v", consumerResult.UsedDeps)
+	}
+
+	// Package names should NOT appear
+	if usedDepsMap["pkg1"] || usedDepsMap["pkg2"] {
+		t.Errorf("package names should not be in used deps, got %v", consumerResult.UsedDeps)
+	}
+
+	if consumerResult.HasIssues() {
+		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
+			consumerResult.Undeclared, consumerResult.Unused)
+	}
+}
+
+// TestPointerTypeOutputResolution tests that pointer types in Node output are handled.
+func TestPointerTypeOutputResolution(t *testing.T) {
+	results, err := AnalyzeDir("testcases/typeresolution")
+	if err != nil {
+		t.Fatalf("AnalyzeDir error: %v", err)
+	}
+
+	// Just verify no panics and basic structure works
+	foundProvider := false
+	foundPointerConsumer := false
+	for _, r := range results {
+		if r.NodeID == "connection-provider" {
+			foundProvider = true
+		}
+		if r.NodeID == "pointer-consumer" {
+			foundPointerConsumer = true
+			// Verify it has no issues
+			if r.HasIssues() {
+				t.Errorf("pointer-consumer: expected no issues, but got: undeclared=%v, unused=%v",
+					r.Undeclared, r.Unused)
+			}
+		}
+	}
+
+	if !foundProvider {
+		t.Error("connection-provider node not found")
+	}
+	if !foundPointerConsumer {
+		t.Error("pointer-consumer node not found")
 	}
 }
 

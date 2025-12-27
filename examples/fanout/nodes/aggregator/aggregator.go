@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/grindlemire/graft"
+	"github.com/grindlemire/graft/examples/fanout/nodes/shared"
 	"github.com/grindlemire/graft/examples/fanout/nodes/svc1"
 	"github.com/grindlemire/graft/examples/fanout/nodes/svc2"
 	"github.com/grindlemire/graft/examples/fanout/nodes/svc3"
@@ -24,7 +25,7 @@ type Output struct {
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []graft.ID{svc1.ID, svc2.ID, svc3.ID, svc4.ID, svc5.ID},
+		DependsOn: []graft.ID{svc1.ID, svc2.ID, svc3.ID, svc4.ID, svc5.ID, shared.ID1, shared.ID2},
 		Run:       run,
 	})
 }
@@ -51,12 +52,23 @@ func run(ctx context.Context) (Output, error) {
 		return Output{}, err
 	}
 
+	shared1, err := graft.Dep[shared.Output1](ctx)
+	if err != nil {
+		return Output{}, err
+	}
+	shared2, err := graft.Dep[shared.Output2](ctx)
+	if err != nil {
+		return Output{}, err
+	}
+
 	services := []svc1.Output{
 		{Name: s1.Name, Result: s1.Result},
 		{Name: s2.Name, Result: s2.Result},
 		{Name: s3.Name, Result: s3.Result},
 		{Name: s4.Name, Result: s4.Result},
 		{Name: s5.Name, Result: s5.Result},
+		{Name: shared1.Name, Result: shared1.Result},
+		{Name: shared2.Name, Result: shared2.Result},
 	}
 
 	fmt.Printf("[aggregator] Aggregating %d service results...\n", len(services))
