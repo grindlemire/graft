@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/grindlemire/graft"
-	"github.com/grindlemire/graft/testcases/importpaths/internal/services/auth/providers"
+	"github.com/grindlemire/graft/internal/testcases/importpaths/internal/services/auth/providers"
 )
 
 const ID graft.ID = "handler"

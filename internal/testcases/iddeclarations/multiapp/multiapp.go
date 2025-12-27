@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/grindlemire/graft"
-	"github.com/grindlemire/graft/testcases/iddeclarations/shared"
+	"github.com/grindlemire/graft/internal/testcases/iddeclarations/shared"
 )
 
 const ID graft.ID = "app"

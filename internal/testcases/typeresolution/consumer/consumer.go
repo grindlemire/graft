@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/grindlemire/graft"
-	"github.com/grindlemire/graft/testcases/typeresolution/pkg1"
-	"github.com/grindlemire/graft/testcases/typeresolution/pkg2"
+	"github.com/grindlemire/graft/internal/testcases/typeresolution/pkg1"
+	"github.com/grindlemire/graft/internal/testcases/typeresolution/pkg2"
 )
 
 const ID graft.ID = "consumer"

@@ -1,24 +1,23 @@
-package consumer
+package consumer1
 
 import (
 	"context"
 
 	"github.com/grindlemire/graft"
-	"github.com/grindlemire/graft/testcases/iddeclarations/producer"
+	t "github.com/grindlemire/graft/internal/testcases/importaliases/types"
 )
 
-const ID graft.ID = "consumer"
+const ID graft.ID = "consumer1"
 
 type Output struct{}
 
 func init() {
 	graft.Register(graft.Node[Output]{
 		ID:        ID,
-		DependsOn: []graft.ID{producer.MyNodeIdentifier},
+		DependsOn: []graft.ID{t.ConfigID},
 		Run: func(ctx context.Context) (Output, error) {
-			_, _ = graft.Dep[producer.Data](ctx)
+			_, _ = graft.Dep[t.Config](ctx)
 			return Output{}, nil
 		},
 	})
 }
-
