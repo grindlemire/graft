@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/grindlemire/graft"
-	"github.com/grindlemire/graft/testcases/typeresolution/provider"
+	"github.com/grindlemire/graft/internal/testcases/typeresolution/provider"
 )
 
 const ID graft.ID = "pointer-consumer"

@@ -939,7 +939,7 @@ func (d dep1Output) String() string { return "" }
 // of the type argument (e.g., Dep[ports.Executor] -> "ports") instead of resolving to the
 // actual node ID that outputs that type (e.g., "executor").
 func TestSharedInterfacePackage(t *testing.T) {
-	results, err := AnalyzeDir("testcases/sharedinterface")
+	results, err := AnalyzeDir("internal/testcases/sharedinterface")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}
@@ -990,7 +990,7 @@ func TestSharedInterfacePackage(t *testing.T) {
 // TestSharedPackageWithImportAlias tests that Dep[T] calls resolve correctly
 // when using a custom import alias for the dependency package.
 func TestSharedPackageWithImportAlias(t *testing.T) {
-	results, err := AnalyzeDir("testcases/importaliases")
+	results, err := AnalyzeDir("internal/testcases/importaliases")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}
@@ -1030,7 +1030,7 @@ func TestSharedPackageWithImportAlias(t *testing.T) {
 // TestNodeIDVariableNameDoesNotMatter tests that the variable name used
 // to store the node ID constant doesn't affect dependency resolution.
 func TestNodeIDVariableNameDoesNotMatter(t *testing.T) {
-	results, err := AnalyzeDir("testcases/iddeclarations")
+	results, err := AnalyzeDir("internal/testcases/iddeclarations")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}
@@ -1055,7 +1055,7 @@ func TestNodeIDVariableNameDoesNotMatter(t *testing.T) {
 // TestMultipleNodesInPackageWithDifferentIDPatterns tests resolution when
 // multiple nodes in the same package use different ID declaration patterns.
 func TestMultipleNodesInPackageWithDifferentIDPatterns(t *testing.T) {
-	results, err := AnalyzeDir("testcases/iddeclarations")
+	results, err := AnalyzeDir("internal/testcases/iddeclarations")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}
@@ -1097,7 +1097,7 @@ func TestMultipleNodesInPackageWithDifferentIDPatterns(t *testing.T) {
 
 // TestDeepNestedImportPath tests that deeply nested import paths resolve correctly.
 func TestDeepNestedImportPath(t *testing.T) {
-	results, err := AnalyzeDir("testcases/importpaths")
+	results, err := AnalyzeDir("internal/testcases/importpaths")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}
@@ -1137,7 +1137,7 @@ func TestDeepNestedImportPath(t *testing.T) {
 // when the same package is (hypothetically) imported with different aliases in different files.
 // This simulates the case where node resolution must work across files with different import styles.
 func TestMultipleImportAliasesSamePackage(t *testing.T) {
-	results, err := AnalyzeDir("testcases/importaliases")
+	results, err := AnalyzeDir("internal/testcases/importaliases")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}
@@ -1179,7 +1179,7 @@ func TestMultipleImportAliasesSamePackage(t *testing.T) {
 // TestDependsOnWithDifferentIDFormats tests that DependsOn declarations work
 // with various formats: string literals, pkg.ID constants, and graft.ID() calls.
 func TestDependsOnWithDifferentIDFormats(t *testing.T) {
-	results, err := AnalyzeDir("testcases/dependencyformats")
+	results, err := AnalyzeDir("internal/testcases/dependencyformats")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}
@@ -1213,7 +1213,7 @@ func TestDependsOnWithDifferentIDFormats(t *testing.T) {
 // TestSameTypeNameDifferentPackages tests that the analyzer correctly distinguishes
 // between types with the same name but from different packages.
 func TestSameTypeNameDifferentPackages(t *testing.T) {
-	results, err := AnalyzeDir("testcases/typeresolution")
+	results, err := AnalyzeDir("internal/testcases/typeresolution")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}
@@ -1255,7 +1255,7 @@ func TestSameTypeNameDifferentPackages(t *testing.T) {
 
 // TestPointerTypeOutputResolution tests that pointer types in Node output are handled.
 func TestPointerTypeOutputResolution(t *testing.T) {
-	results, err := AnalyzeDir("testcases/typeresolution")
+	results, err := AnalyzeDir("internal/testcases/typeresolution")
 	if err != nil {
 		t.Fatalf("AnalyzeDir error: %v", err)
 	}

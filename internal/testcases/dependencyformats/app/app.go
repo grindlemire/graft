@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/grindlemire/graft"
-	"github.com/grindlemire/graft/testcases/dependencyformats/dep1"
-	"github.com/grindlemire/graft/testcases/dependencyformats/dep2"
+	"github.com/grindlemire/graft/internal/testcases/dependencyformats/dep1"
+	"github.com/grindlemire/graft/internal/testcases/dependencyformats/dep2"
 )
 
 const ID graft.ID = "app"

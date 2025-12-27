@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/grindlemire/graft"
-	apptypes "github.com/grindlemire/graft/testcases/importaliases/types"
+	apptypes "github.com/grindlemire/graft/internal/testcases/importaliases/types"
 )
 
 const ID graft.ID = "consumer2"

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/grindlemire/graft"
-	svc "github.com/grindlemire/graft/testcases/importaliases/services"
+	svc "github.com/grindlemire/graft/internal/testcases/importaliases/services"
 )
 
 const ID graft.ID = "app"
