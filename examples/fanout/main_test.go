@@ -7,5 +7,5 @@ import (
 )
 
 func TestMyGraph(t *testing.T) {
-	graft.AssertDepsValid(t, ".", graft.WithVerboseTesting())
+	graft.AssertDepsValid(t, ".", graft.WithVerboseTesting(), graft.WithDebugTesting())
 }
