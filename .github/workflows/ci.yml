@@ -20,7 +20,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           go test -v -race -coverprofile=coverage.out -covermode=atomic \
-            -coverpkg=$(go list ./... | grep -v /examples/ | tr '\n' ',') \
+            -coverpkg=$(go list ./... | grep -v -e /examples/ -e /internal/testcases/ | tr '\n' ',') \
             ./...
 
       - name: Upload coverage to Coveralls
