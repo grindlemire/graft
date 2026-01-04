@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -78,12 +77,16 @@ var AnalyzeDirDebug = false
 
 // AnalyzeDir analyzes all Go files in a directory for dependency correctness.
 //
-// It recursively walks the directory, parsing each .go file (excluding _test.go)
-// and extracting graft.Node[T] definitions. For each node found, it compares
-// declared dependencies against actual Dep[T] usage.
+// This function uses type-aware analysis with go/packages and go/ssa to accurately
+// detect dependency issues. It discovers all graft.Node[T] registrations in the
+// directory and compares declared dependencies (in DependsOn) against actual
+// Dep[T] usage in Run functions.
 //
-// Uses two passes: first collects all node registrations to build a type registry,
-// then analyzes each node's dependencies using that registry.
+// The type-aware approach is more robust than AST-based pattern matching:
+//   - Handles type aliases correctly
+//   - Resolves package imports accurately
+//   - Works with various code structures (dependencies in same package, etc.)
+//   - Uses SSA for precise dataflow analysis
 //
 // Returns all nodes found with their analysis results. Use [AnalysisResult.HasIssues]
 // to filter for problems.
@@ -100,313 +103,31 @@ var AnalyzeDirDebug = false
 //	    }
 //	}
 func AnalyzeDir(dir string) ([]AnalysisResult, error) {
-	if AnalyzeDirDebug {
-		absDir, _ := filepath.Abs(dir)
-		fmt.Printf("[ANALYZE DEBUG] Walking directory: %s (abs: %s)\n", dir, absDir)
+	cfg := AnalyzerConfig{
+		WorkDir: dir,
+		Debug:   AnalyzeDirDebug,
 	}
-
-	// Pass 1: Collect all node registrations to build type registry
-	typeReg, idRefReg, nodeInfos, err := buildTypeRegistry(dir)
-	if err != nil {
-		return nil, fmt.Errorf("building type registry: %w", err)
-	}
-
-	if AnalyzeDirDebug {
-		fmt.Printf("[ANALYZE DEBUG] Type registry: %v\n", typeReg)
-		fmt.Printf("[ANALYZE DEBUG] ID Ref registry: %v\n", idRefReg)
-		fmt.Printf("[ANALYZE DEBUG] Collected %d node(s)\n", len(nodeInfos))
-	}
-
-	// Pass 2: Analyze each node using the registries
-	var results []AnalysisResult
-	for _, info := range nodeInfos {
-		result, err := analyzeNodeWithRegistry(info, typeReg, idRefReg)
-		if err != nil {
-			return nil, fmt.Errorf("analyzing node %s in %s: %w", info.CanonicalID, info.File, err)
-		}
-		if result != nil {
-			results = append(results, *result)
-		}
-	}
-
-	return results, nil
-}
-
-// buildTypeRegistry walks all files and collects node registrations.
-// Returns the type registry, ID reference registry, and a list of node info for pass 2.
-func buildTypeRegistry(dir string) (typeRegistry, idRefRegistry, []*nodeInfo, error) {
-	typeReg := make(typeRegistry)
-	idRefReg := make(idRefRegistry)
-	var nodeInfos []*nodeInfo
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			if AnalyzeDirDebug {
-				fmt.Printf("[ANALYZE DEBUG] Walk error at %s: %v\n", path, err)
-			}
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
-		if err != nil {
-			return fmt.Errorf("parsing %s: %w", path, err)
-		}
-
-		importRes := buildImportResolver(f)
-		constRes := buildConstResolver(f)
-		pkgName := f.Name.Name
-
-		// Find all Node[T] composite literals
-		ast.Inspect(f, func(n ast.Node) bool {
-			comp, ok := n.(*ast.CompositeLit)
-			if !ok {
-				return true
-			}
-
-			nodeInfo := collectNodeInfo(comp, importRes, constRes, path, pkgName)
-			if nodeInfo == nil {
-				return true
-			}
-
-			// Register: canonical type -> canonical ID
-			typeReg[nodeInfo.OutputType] = nodeInfo.CanonicalID
-
-			// Register ID reference if we have one (e.g., "myapp/dep.ID" -> "dep-node")
-			if nodeInfo.CanonicalIDRef != "" {
-				idRefReg[nodeInfo.CanonicalIDRef] = nodeInfo.CanonicalID
-			}
-
-			nodeInfos = append(nodeInfos, nodeInfo)
-
-			if AnalyzeDirDebug {
-				fmt.Printf("[ANALYZE DEBUG] Registered: %s -> %s (from %s)\n",
-					nodeInfo.OutputType, nodeInfo.CanonicalID, path)
-				if nodeInfo.CanonicalIDRef != "" {
-					fmt.Printf("[ANALYZE DEBUG] ID Ref: %s -> %s\n",
-						nodeInfo.CanonicalIDRef, nodeInfo.CanonicalID)
-				}
-			}
-
-			return true
-		})
-
-		return nil
-	})
-
-	return typeReg, idRefReg, nodeInfos, err
-}
-
-// analyzeNodeWithRegistry analyzes a single node using the type and ID ref registries.
-func analyzeNodeWithRegistry(info *nodeInfo, typeReg typeRegistry, idRefReg idRefRegistry) (*AnalysisResult, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, info.File, nil, parser.ParseComments)
-	if err != nil {
-		return nil, err
-	}
-
-	importRes := buildImportResolver(f)
-	constRes := buildConstResolver(f)
-
-	// Build a map of function declarations for Run function reference resolution
-	funcDecls := make(map[string]*ast.FuncDecl)
-	for _, decl := range f.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok {
-			funcDecls[fn.Name.Name] = fn
-		}
-	}
-
-	pkgName := f.Name.Name
-
-	// Find the Node composite literal for this node
-	var nodeComp *ast.CompositeLit
-	ast.Inspect(f, func(n ast.Node) bool {
-		comp, ok := n.(*ast.CompositeLit)
-		if !ok {
-			return true
-		}
-
-		// Check if this is the node we're looking for
-		compInfo := collectNodeInfo(comp, importRes, constRes, info.File, pkgName)
-		if compInfo != nil && compInfo.CanonicalID == info.CanonicalID && compInfo.OutputType == info.OutputType {
-			nodeComp = comp
-			return false // found it, stop searching
-		}
-		return true
-	})
-
-	if nodeComp == nil {
-		// Node not found in file (shouldn't happen, but handle gracefully)
-		return nil, nil
-	}
-
-	// Resolve declared deps using ID ref registry
-	// This converts canonical ID refs (like "myapp/dep2.ID") to actual ID values (like "dep2-node")
-	resolvedDeclaredDeps := make(map[string]bool)
-	for canonicalRef := range info.DeclaredDeps {
-		if resolvedID, ok := idRefReg[canonicalRef]; ok {
-			resolvedDeclaredDeps[resolvedID] = true
-		} else {
-			// Try short form lookup (pkgName.ID) for full path refs (myapp/dep2.ID)
-			if idx := strings.LastIndex(canonicalRef, "/"); idx != -1 {
-				shortRef := canonicalRef[idx+1:]
-				if resolvedID, ok := idRefReg[shortRef]; ok {
-					resolvedDeclaredDeps[resolvedID] = true
-					continue
-				}
-			}
-			// Keep the original if not resolvable (e.g., string literals)
-			resolvedDeclaredDeps[canonicalRef] = true
-		}
-	}
-
-	// Analyze the Run function to find Dep[T] calls
-	na := &nodeAnalyzer{
-		declaredDeps:   resolvedDeclaredDeps,
-		usedDeps:       make(map[string]bool),
-		typeRegistry:   typeReg,
-		importResolver: importRes,
-	}
-
-	// Extract the Run function and walk it
-	for _, elt := range nodeComp.Elts {
-		kv, ok := elt.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		key, ok := kv.Key.(*ast.Ident)
-		if !ok || key.Name != "Run" {
-			continue
-		}
-
-		// Handle inline function literals
-		if _, ok := kv.Value.(*ast.FuncLit); ok {
-			ast.Walk(na, kv.Value)
-		} else if ident, ok := kv.Value.(*ast.Ident); ok {
-			// Handle function reference: Run: run
-			if fn, found := funcDecls[ident.Name]; found {
-				ast.Walk(na, fn.Body)
-			}
-		}
-		break
-	}
-
-	// Build result
-	result := &AnalysisResult{
-		NodeID: info.CanonicalID,
-		File:   info.File,
-	}
-
-	for dep := range na.declaredDeps {
-		result.DeclaredDeps = append(result.DeclaredDeps, dep)
-	}
-	for dep := range na.usedDeps {
-		result.UsedDeps = append(result.UsedDeps, dep)
-	}
-
-	// Find undeclared (used but not declared)
-	// Use a helper to match canonical forms with fallback package names
-	for usedDep := range na.usedDeps {
-		if !matchesDeclaredDep(usedDep, na.declaredDeps) {
-			result.Undeclared = append(result.Undeclared, usedDep)
-		}
-	}
-
-	// Find unused (declared but not used)
-	// Use a helper to match canonical forms with fallback package names
-	for declaredDep := range na.declaredDeps {
-		if !matchesUsedDep(declaredDep, na.usedDeps) {
-			result.Unused = append(result.Unused, declaredDep)
-		}
-	}
-
-	return result, nil
-}
-
-// matchesDeclaredDep checks if a used dependency matches any declared dependency.
-// Handles both exact matches and fallback package name matching.
-func matchesDeclaredDep(usedDep string, declaredDeps map[string]bool) bool {
-	if declaredDeps[usedDep] {
-		return true
-	}
-	// If usedDep is a package name (fallback), check if any declared dep
-	// is a string literal matching it, or ends with it
-	for declaredDep := range declaredDeps {
-		// Exact string literal match
-		if declaredDep == usedDep {
-			return true
-		}
-		// Check if declared dep ends with the package name (e.g., "myapp/nodes/dep1.ID" ends with "dep1")
-		if strings.HasSuffix(declaredDep, "."+usedDep) || strings.HasSuffix(declaredDep, "/"+usedDep) {
-			return true
-		}
-		// Check if declared dep is a canonical form that ends with the package name
-		// e.g., "myapp/nodes/dep1" matches "dep1"
-		parts := strings.Split(declaredDep, "/")
-		if len(parts) > 0 && parts[len(parts)-1] == usedDep {
-			return true
-		}
-		// Check if declared dep ends with ".ID" and the base matches
-		if strings.HasSuffix(declaredDep, ".ID") {
-			base := strings.TrimSuffix(declaredDep, ".ID")
-			if base == usedDep || strings.HasSuffix(base, "/"+usedDep) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// matchesUsedDep checks if a declared dependency matches any used dependency.
-// Handles both exact matches and fallback package name matching.
-func matchesUsedDep(declaredDep string, usedDeps map[string]bool) bool {
-	if usedDeps[declaredDep] {
-		return true
-	}
-	// Extract package name from canonical form and check if it matches any used dep
-	// e.g., "myapp/nodes/dep1.ID" -> check if "dep1" is in usedDeps
-	parts := strings.Split(declaredDep, "/")
-	if len(parts) > 0 {
-		lastPart := parts[len(parts)-1]
-		// Remove ".ID" suffix if present
-		lastPart = strings.TrimSuffix(lastPart, ".ID")
-		if usedDeps[lastPart] {
-			return true
-		}
-		// Extract identifier after the last dot (e.g., "shared.ID1" -> "ID1")
-		if dotIdx := strings.LastIndex(lastPart, "."); dotIdx != -1 {
-			identName := lastPart[dotIdx+1:]
-			if usedDeps[identName] {
-				return true
-			}
-		}
-	}
-	// Also check if declaredDep is a string literal that matches a used dep
-	for usedDep := range usedDeps {
-		if declaredDep == usedDep {
-			return true
-		}
-	}
-	return false
+	analyzer := newTypeAwareAnalyzer(cfg)
+	return analyzer.Analyze(dir)
 }
 
 // AnalyzeFile analyzes a single Go file for graft.Node[T] dependency correctness.
 //
-// Parses the file's AST and finds all graft.Node[T] composite literals.
+// Deprecated: AnalyzeFile uses AST-based pattern matching which is less accurate
+// than type-aware analysis. Use [AnalyzeDir] instead, which uses go/packages and
+// go/ssa for more robust dependency validation. AnalyzeFile is kept for backward
+// compatibility but may be removed in a future version.
+//
+// AnalyzeFile parses the file's AST and finds all graft.Node[T] composite literals.
 // For each node, it extracts:
 //   - The ID field value
 //   - Dependencies from DependsOn
 //   - Dependencies used via Dep[T] calls in the Run function
 //
 // Returns one AnalysisResult per node found in the file.
-// Note: This builds a registry only from nodes in this file, so cross-file
-// type resolution may fall back to package name heuristics.
+//
+// Note: This function has limitations with type aliases, package imports, and
+// complex code structures. Use [AnalyzeDir] for more accurate results.
 func AnalyzeFile(path string) ([]AnalysisResult, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
@@ -814,7 +535,6 @@ func (a *fileAnalyzer) getPackageNameAsID(identName string) string {
 	dir := filepath.Dir(a.file)
 	return filepath.Base(dir)
 }
-
 
 // analyzeNodeLiteral extracts dependency info from a Node composite literal.
 func (a *fileAnalyzer) analyzeNodeLiteral(comp *ast.CompositeLit) *AnalysisResult {
