@@ -3,6 +3,8 @@ package graft
 import (
 	"fmt"
 	"strings"
+
+	"github.com/grindlemire/graft/internal/typeaware"
 )
 
 // AnalysisResult contains the result of analyzing a node's dependency usage.
@@ -99,12 +101,31 @@ var AnalyzeDirDebug = false
 //	    }
 //	}
 func AnalyzeDir(dir string) ([]AnalysisResult, error) {
-	cfg := AnalyzerConfig{
+	cfg := typeaware.Config{
 		WorkDir: dir,
 		Debug:   AnalyzeDirDebug,
 	}
-	analyzer := newTypeAwareAnalyzer(cfg)
-	return analyzer.Analyze(dir)
+	analyzer := typeaware.New(cfg)
+	results, err := analyzer.Analyze(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert internal results to public API
+	publicResults := make([]AnalysisResult, len(results))
+	for i, r := range results {
+		publicResults[i] = AnalysisResult{
+			NodeID:       r.NodeID,
+			File:         r.File,
+			DeclaredDeps: r.DeclaredDeps,
+			UsedDeps:     r.UsedDeps,
+			Undeclared:   r.Undeclared,
+			Unused:       r.Unused,
+			Cycles:       r.Cycles,
+		}
+	}
+
+	return publicResults, nil
 }
 
 // ValidateDeps is a convenience function that returns an error if any
