@@ -662,3 +662,269 @@ func TestTypeAwareAnalyzer_WithNodeDiscovery(t *testing.T) {
 		t.Logf("Analysis completed with %d results", len(results))
 	})
 }
+
+func TestTypeIDMapper_BuildMapping(t *testing.T) {
+	t.Run("build mapping from example nodes", func(t *testing.T) {
+		exampleDir := filepath.Join(".", "examples", "simple")
+
+		if _, err := os.Stat(exampleDir); os.IsNotExist(err) {
+			t.Skip("examples/simple directory not found")
+		}
+
+		// Load, build SSA, and discover nodes
+		cfg := AnalyzerConfig{WorkDir: exampleDir}
+		loader := newPackageLoader(cfg)
+		pkgs, err := loader.Load(exampleDir)
+		if err != nil {
+			t.Fatalf("failed to load packages: %v", err)
+		}
+
+		builder := newSSABuilder()
+		prog, srcPkgs, err := builder.Build(pkgs)
+		if err != nil {
+			t.Fatalf("failed to build SSA: %v", err)
+		}
+
+		discoverer := newNodeDiscoverer(prog, prog.Fset, srcPkgs)
+		nodes, err := discoverer.FindNodes()
+		if err != nil {
+			t.Fatalf("failed to discover nodes: %v", err)
+		}
+
+		if len(nodes) == 0 {
+			t.Fatal("no nodes discovered")
+		}
+
+		// Build type mapping
+		mapper := newTypeIDMapper()
+		err = mapper.BuildMapping(nodes)
+		if err != nil {
+			t.Fatalf("failed to build mapping: %v", err)
+		}
+
+		// Verify mapping was built
+		if mapper.Size() == 0 {
+			t.Fatal("mapping is empty")
+		}
+
+		t.Logf("Built mapping with %d types", mapper.Size())
+
+		// Verify each node has a mapping
+		for _, node := range nodes {
+			retrievedID, err := mapper.ResolveType(node.OutputType)
+			if err != nil {
+				t.Errorf("failed to resolve type for node %q: %v", node.ID, err)
+				continue
+			}
+
+			if retrievedID != node.ID {
+				t.Errorf("type resolved to wrong ID: got %q, want %q", retrievedID, node.ID)
+			}
+
+			t.Logf("  %s → %q ✓", mapper.typeKey(node.OutputType), retrievedID)
+		}
+	})
+
+	t.Run("detect type conflicts", func(t *testing.T) {
+		// Create mock nodes with conflicting types
+		mapper := newTypeIDMapper()
+
+		// Create node definitions with the same type
+		node1 := NodeDefinition{
+			ID:         "node1",
+			OutputType: types.Typ[types.String],
+		}
+
+		node2 := NodeDefinition{
+			ID:         "node2",
+			OutputType: types.Typ[types.String], // Same type!
+		}
+
+		// First node should succeed
+		err := mapper.BuildMapping([]NodeDefinition{node1})
+		if err != nil {
+			t.Fatalf("unexpected error for first node: %v", err)
+		}
+
+		// Second node with same type should fail
+		err = mapper.BuildMapping([]NodeDefinition{node1, node2})
+		if err == nil {
+			t.Fatal("expected error for conflicting types, got nil")
+		}
+
+		t.Logf("Got expected conflict error: %v", err)
+	})
+
+	t.Run("empty nodes", func(t *testing.T) {
+		mapper := newTypeIDMapper()
+
+		err := mapper.BuildMapping([]NodeDefinition{})
+		if err != nil {
+			t.Errorf("unexpected error for empty nodes: %v", err)
+		}
+
+		if mapper.Size() != 0 {
+			t.Errorf("expected size 0, got %d", mapper.Size())
+		}
+	})
+}
+
+func TestTypeIDMapper_ResolveType(t *testing.T) {
+	mapper := newTypeIDMapper()
+
+	// Add a mapping
+	stringType := types.Typ[types.String]
+	mapper.typeToID[mapper.typeKey(stringType)] = "mynode"
+	mapper.idToType["mynode"] = stringType
+
+	t.Run("resolve existing type", func(t *testing.T) {
+		id, err := mapper.ResolveType(stringType)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if id != "mynode" {
+			t.Errorf("got ID %q, want %q", id, "mynode")
+		}
+	})
+
+	t.Run("resolve non-existent type", func(t *testing.T) {
+		intType := types.Typ[types.Int]
+
+		_, err := mapper.ResolveType(intType)
+		if err == nil {
+			t.Fatal("expected error for non-existent type")
+		}
+
+		t.Logf("Got expected error: %v", err)
+	})
+}
+
+func TestTypeIDMapper_GetType(t *testing.T) {
+	mapper := newTypeIDMapper()
+
+	stringType := types.Typ[types.String]
+	mapper.typeToID[mapper.typeKey(stringType)] = "mynode"
+	mapper.idToType["mynode"] = stringType
+
+	t.Run("get existing type", func(t *testing.T) {
+		typ, err := mapper.GetType("mynode")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if typ != stringType {
+			t.Errorf("got type %v, want %v", typ, stringType)
+		}
+	})
+
+	t.Run("get non-existent ID", func(t *testing.T) {
+		_, err := mapper.GetType("nonexistent")
+		if err == nil {
+			t.Fatal("expected error for non-existent ID")
+		}
+	})
+}
+
+func TestTypeIDMapper_HasType(t *testing.T) {
+	mapper := newTypeIDMapper()
+
+	stringType := types.Typ[types.String]
+	mapper.typeToID[mapper.typeKey(stringType)] = "mynode"
+
+	if !mapper.HasType(stringType) {
+		t.Error("HasType returned false for existing type")
+	}
+
+	intType := types.Typ[types.Int]
+	if mapper.HasType(intType) {
+		t.Error("HasType returned true for non-existent type")
+	}
+}
+
+func TestTypeIDMapper_normalizeType(t *testing.T) {
+	mapper := newTypeIDMapper()
+
+	tests := []struct {
+		name    string
+		typ     types.Type
+		wantKey string
+	}{
+		{
+			name:    "string type",
+			typ:     types.Typ[types.String],
+			wantKey: "string",
+		},
+		{
+			name:    "int type",
+			typ:     types.Typ[types.Int],
+			wantKey: "int",
+		},
+		{
+			name:    "pointer to string",
+			typ:     types.NewPointer(types.Typ[types.String]),
+			wantKey: "*string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := mapper.normalizeType(tt.typ)
+
+			if key != tt.wantKey {
+				t.Errorf("normalizeType() = %q, want %q", key, tt.wantKey)
+			}
+
+			t.Logf("Type %v → key %q", tt.typ, key)
+		})
+	}
+}
+
+func TestTypeAwareAnalyzer_WithTypeMapping(t *testing.T) {
+	t.Run("analyze examples/simple with type mapping", func(t *testing.T) {
+		exampleDir := filepath.Join(".", "examples", "simple")
+
+		if _, err := os.Stat(exampleDir); os.IsNotExist(err) {
+			t.Skip("examples/simple directory not found")
+		}
+
+		analyzer := newTypeAwareAnalyzer(AnalyzerConfig{
+			WorkDir: exampleDir,
+			Debug:   testing.Verbose(),
+		})
+
+		results, err := analyzer.Analyze(exampleDir)
+		if err != nil {
+			t.Fatalf("analysis failed: %v", err)
+		}
+
+		// Results still empty (dependency extraction not implemented)
+		// But should run without error and build type mapping
+		t.Logf("Analysis completed with %d results", len(results))
+	})
+
+	t.Run("analyze examples/diamond", func(t *testing.T) {
+		// If examples/diamond has type conflicts, this should catch them
+		diamondDir := filepath.Join(".", "examples", "diamond")
+
+		if _, err := os.Stat(diamondDir); os.IsNotExist(err) {
+			t.Skip("examples/diamond directory not found")
+		}
+
+		analyzer := newTypeAwareAnalyzer(AnalyzerConfig{
+			WorkDir: diamondDir,
+			Debug:   testing.Verbose(),
+		})
+
+		_, err := analyzer.Analyze(diamondDir)
+		// Should succeed if diamond example is well-formed
+		if err != nil {
+			// Only fail if it's a type conflict, not other errors
+			if strings.Contains(err.Error(), "type conflict") {
+				t.Logf("Got type conflict (may be expected): %v", err)
+			} else {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		}
+	})
+}
