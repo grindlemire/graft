@@ -70,10 +70,8 @@ func AssertDepsValid(t testing.TB, dir string, opts ...AssertOption) {
 	// Enable AST-level debug flags if requested
 	if cfg.Debug {
 		AnalyzeDirDebug = true
-		AnalyzeFileDebug = true
 		defer func() {
 			AnalyzeDirDebug = false
-			AnalyzeFileDebug = false
 		}()
 	}
 

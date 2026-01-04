@@ -108,7 +108,6 @@ var node = graft.Node[string]{
 
 	// Save original debug state
 	origDirDebug := AnalyzeDirDebug
-	origFileDebug := AnalyzeFileDebug
 
 	mock := &mockT{}
 	AssertDepsValid(mock, tmpDir, WithDebugTesting())
@@ -116,9 +115,6 @@ var node = graft.Node[string]{
 	// Debug flags should be reset after call
 	if AnalyzeDirDebug != origDirDebug {
 		t.Error("AnalyzeDirDebug was not reset after AssertDepsValid")
-	}
-	if AnalyzeFileDebug != origFileDebug {
-		t.Error("AnalyzeFileDebug was not reset after AssertDepsValid")
 	}
 
 	if !mock.helperCalled {

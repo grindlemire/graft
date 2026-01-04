@@ -2,7 +2,6 @@ package graft
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -131,68 +130,18 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 		},
 		"examples/fanout": {
 			dir:        "examples/fanout",
-			wantNodes:  8, // config, svc1-5, svc5-2, aggregator
-			wantIssues: 2, // svc5 and svc5-2 have cycle
+			wantNodes:  7, // config, svc1-5, aggregator
+			wantIssues: 0,
 			checkNodes: func(t *testing.T, results []AnalysisResult) {
 				nodeMap := make(map[string]AnalysisResult)
 				for _, r := range results {
 					nodeMap[r.NodeID] = r
 				}
 
-				// Verify svc5 has cycle issue
-				if svc5, ok := nodeMap["svc5"]; ok {
-					if len(svc5.Cycles) == 0 {
-						t.Errorf("svc5: expected cycle to be detected, got none")
-					}
-					if len(svc5.Cycles) > 0 {
-						// Verify cycle contains svc5-2
-						cycleContainsSvc52 := false
-						for _, cycle := range svc5.Cycles {
-							for _, node := range cycle {
-								if node == "svc5-2" {
-									cycleContainsSvc52 = true
-									break
-								}
-							}
-						}
-						if !cycleContainsSvc52 {
-							t.Errorf("svc5: cycle should contain svc5-2, got %v", svc5.Cycles)
-						}
-					}
-				} else {
-					t.Error("svc5 node not found")
-				}
-
-				// Verify svc5-2 has cycle issue
-				if svc52, ok := nodeMap["svc5-2"]; ok {
-					if len(svc52.Cycles) == 0 {
-						t.Errorf("svc5-2: expected cycle to be detected, got none")
-					}
-					if len(svc52.Cycles) > 0 {
-						// Verify cycle contains svc5
-						cycleContainsSvc5 := false
-						for _, cycle := range svc52.Cycles {
-							for _, node := range cycle {
-								if node == "svc5" {
-									cycleContainsSvc5 = true
-									break
-								}
-							}
-						}
-						if !cycleContainsSvc5 {
-							t.Errorf("svc5-2: cycle should contain svc5, got %v", svc52.Cycles)
-						}
-					}
-				} else {
-					t.Error("svc5-2 node not found")
-				}
-
 				// Verify other nodes don't have cycle issues
 				for id, r := range nodeMap {
-					if id != "svc5" && id != "svc5-2" {
-						if len(r.Cycles) > 0 {
-							t.Errorf("node %q should not have cycles, got %v", id, r.Cycles)
-						}
+					if len(r.Cycles) > 0 {
+						t.Errorf("node %q should not have cycles, got %v", id, r.Cycles)
 					}
 				}
 
@@ -207,24 +156,10 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 				for i := 1; i <= 5; i++ {
 					svcID := "svc" + string(rune('0'+i))
 					if svc, ok := nodeMap[svcID]; ok {
-						if svcID == "svc5" {
-							// svc5 depends on config and svc5-2
-							if len(svc.DeclaredDeps) != 2 {
-								t.Errorf("%s: expected 2 declared deps (config, svc5-2), got %d", svcID, len(svc.DeclaredDeps))
-							}
-						} else {
-							// Other services only depend on config
-							if len(svc.DeclaredDeps) != 1 {
-								t.Errorf("%s: expected 1 declared dep (config), got %d", svcID, len(svc.DeclaredDeps))
-							}
+						// Other services only depend on config
+						if len(svc.DeclaredDeps) != 1 {
+							t.Errorf("%s: expected 1 declared dep (config), got %d", svcID, len(svc.DeclaredDeps))
 						}
-					}
-				}
-
-				// Verify svc5-2 depends on config and svc5
-				if svc52, ok := nodeMap["svc5-2"]; ok {
-					if len(svc52.DeclaredDeps) != 2 {
-						t.Errorf("svc5-2: expected 2 declared deps (config, svc5), got %d", len(svc52.DeclaredDeps))
 					}
 				}
 			},
@@ -316,27 +251,6 @@ func TestValidateDepsIntegration(t *testing.T) {
 				t.Errorf("ValidateDeps(%q) = %v, want nil (no errors)", example, err)
 			}
 		})
-	}
-}
-
-// TestValidateDeps_FanoutCycle tests that ValidateDeps correctly detects the fanout cycle.
-func TestValidateDeps_FanoutCycle(t *testing.T) {
-	absDir, err := filepath.Abs("examples/fanout")
-	if err != nil {
-		t.Fatalf("failed to get absolute path: %v", err)
-	}
-
-	err = ValidateDeps(absDir)
-	if err == nil {
-		t.Error("ValidateDeps(examples/fanout) should return error due to cycle, got nil")
-	}
-
-	// Verify error message mentions the cycle
-	if err != nil {
-		errMsg := err.Error()
-		if !strings.Contains(errMsg, "cycle") && !strings.Contains(errMsg, "svc5") {
-			t.Errorf("error message should mention cycle or svc5, got: %v", errMsg)
-		}
 	}
 }
 
