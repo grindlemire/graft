@@ -928,3 +928,205 @@ func TestTypeAwareAnalyzer_WithTypeMapping(t *testing.T) {
 		}
 	})
 }
+
+func TestDependencyExtractor_ExtractDeclared(t *testing.T) {
+	t.Run("extract from examples/simple/nodes/db", func(t *testing.T) {
+		exampleDir := filepath.Join(".", "examples", "simple")
+
+		if _, err := os.Stat(exampleDir); os.IsNotExist(err) {
+			t.Skip("examples/simple directory not found")
+		}
+
+		// Full pipeline to get nodes
+		cfg := AnalyzerConfig{WorkDir: exampleDir}
+		loader := newPackageLoader(cfg)
+		pkgs, err := loader.Load(exampleDir)
+		if err != nil {
+			t.Fatalf("failed to load packages: %v", err)
+		}
+
+		builder := newSSABuilder()
+		prog, srcPkgs, err := builder.Build(pkgs)
+		if err != nil {
+			t.Fatalf("failed to build SSA: %v", err)
+		}
+
+		discoverer := newNodeDiscoverer(prog, prog.Fset, srcPkgs)
+		nodes, err := discoverer.FindNodes()
+		if err != nil || len(nodes) == 0 {
+			t.Fatalf("failed to discover nodes: %v", err)
+		}
+
+		mapper := newTypeIDMapper()
+		if err := mapper.BuildMapping(nodes); err != nil {
+			t.Fatalf("failed to build mapping: %v", err)
+		}
+
+		extractor := newDependencyExtractor(mapper, prog, prog.Fset)
+
+		// Extract declared dependencies from db node
+		var dbNode NodeDefinition
+		for _, n := range nodes {
+			if n.ID == "db" {
+				dbNode = n
+				break
+			}
+		}
+
+		if dbNode.ID == "" {
+			t.Fatal("db node not found")
+		}
+
+		declared, err := extractor.ExtractDeclared(dbNode)
+		if err != nil {
+			t.Fatalf("failed to extract declared: %v", err)
+		}
+
+		t.Logf("Declared dependencies for db node: %v", declared)
+
+		// db node depends on config
+		foundConfig := false
+		for _, dep := range declared {
+			if dep == "config" || strings.Contains(dep, "config") {
+				foundConfig = true
+				break
+			}
+		}
+
+		if !foundConfig {
+			t.Errorf("expected to find config in declared dependencies, got: %v", declared)
+		}
+	})
+}
+
+func TestDependencyExtractor_ExtractUsed(t *testing.T) {
+	t.Run("extract from examples/simple/nodes/db", func(t *testing.T) {
+		exampleDir := filepath.Join(".", "examples", "simple")
+
+		if _, err := os.Stat(exampleDir); os.IsNotExist(err) {
+			t.Skip("examples/simple directory not found")
+		}
+
+		// Full pipeline
+		cfg := AnalyzerConfig{WorkDir: exampleDir}
+		loader := newPackageLoader(cfg)
+		pkgs, err := loader.Load(exampleDir)
+		if err != nil {
+			t.Fatalf("failed to load packages: %v", err)
+		}
+
+		builder := newSSABuilder()
+		prog, srcPkgs, err := builder.Build(pkgs)
+		if err != nil {
+			t.Fatalf("failed to build SSA: %v", err)
+		}
+
+		discoverer := newNodeDiscoverer(prog, prog.Fset, srcPkgs)
+		nodes, err := discoverer.FindNodes()
+		if err != nil || len(nodes) == 0 {
+			t.Fatalf("failed to discover nodes: %v", err)
+		}
+
+		mapper := newTypeIDMapper()
+		if err := mapper.BuildMapping(nodes); err != nil {
+			t.Fatalf("failed to build mapping: %v", err)
+		}
+
+		extractor := newDependencyExtractor(mapper, prog, prog.Fset)
+
+		// Find db node
+		var dbNode NodeDefinition
+		for _, n := range nodes {
+			if n.ID == "db" {
+				dbNode = n
+				break
+			}
+		}
+
+		if dbNode.ID == "" {
+			t.Fatal("db node not found")
+		}
+
+		used, err := extractor.ExtractUsed(dbNode)
+		if err != nil {
+			t.Fatalf("failed to extract used: %v", err)
+		}
+
+		t.Logf("Used dependencies for db node: %v", used)
+
+		// db node uses config
+		foundConfig := false
+		for _, dep := range used {
+			if dep == "config" || strings.Contains(dep, "config") {
+				foundConfig = true
+				break
+			}
+		}
+
+		if !foundConfig {
+			t.Errorf("expected to find config in used dependencies, got: %v", used)
+		}
+	})
+}
+
+func TestDependencyExtractor_AnalyzeNode(t *testing.T) {
+	t.Run("analyze examples/simple", func(t *testing.T) {
+		exampleDir := filepath.Join(".", "examples", "simple")
+
+		if _, err := os.Stat(exampleDir); os.IsNotExist(err) {
+			t.Skip("examples/simple directory not found")
+		}
+
+		// Full pipeline
+		cfg := AnalyzerConfig{WorkDir: exampleDir}
+		loader := newPackageLoader(cfg)
+		pkgs, err := loader.Load(exampleDir)
+		if err != nil {
+			t.Fatalf("failed to load packages: %v", err)
+		}
+
+		builder := newSSABuilder()
+		prog, srcPkgs, err := builder.Build(pkgs)
+		if err != nil {
+			t.Fatalf("failed to build SSA: %v", err)
+		}
+
+		discoverer := newNodeDiscoverer(prog, prog.Fset, srcPkgs)
+		nodes, err := discoverer.FindNodes()
+		if err != nil {
+			t.Fatalf("failed to discover nodes: %v", err)
+		}
+
+		mapper := newTypeIDMapper()
+		if err := mapper.BuildMapping(nodes); err != nil {
+			t.Fatalf("failed to build mapping: %v", err)
+		}
+
+		extractor := newDependencyExtractor(mapper, prog, prog.Fset)
+
+		// Analyze all nodes
+		for _, node := range nodes {
+			result, err := extractor.AnalyzeNode(node)
+			if err != nil {
+				t.Errorf("failed to analyze node %q: %v", node.ID, err)
+				continue
+			}
+
+			t.Logf("Node %q:", result.NodeID)
+			t.Logf("  Declared: %v", result.DeclaredDeps)
+			t.Logf("  Used: %v", result.UsedDeps)
+
+			if result.HasIssues() {
+				t.Logf("  Issues:")
+				if len(result.Undeclared) > 0 {
+					t.Logf("    Undeclared: %v", result.Undeclared)
+				}
+				if len(result.Unused) > 0 {
+					t.Logf("    Unused: %v", result.Unused)
+				}
+			} else {
+				t.Logf("  Status: OK")
+			}
+		}
+	})
+}
