@@ -1130,3 +1130,239 @@ func TestDependencyExtractor_AnalyzeNode(t *testing.T) {
 		}
 	})
 }
+
+// TestCycleDetector_SimpleCycle tests detection of a simple 2-node cycle
+func TestCycleDetector_SimpleCycle(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "a", DeclaredDeps: []string{"b"}},
+		{NodeID: "b", DeclaredDeps: []string{"a"}},
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) != 1 {
+		t.Fatalf("expected 1 cycle, got %d: %v", len(cycles), cycles)
+	}
+
+	// Verify cycle contains a → b → a
+	cycle := cycles[0]
+	if len(cycle) != 3 {
+		t.Errorf("expected cycle length 3, got %d: %v", len(cycle), cycle)
+	}
+
+	// Check that cycle is either [a, b, a] or [b, a, b]
+	if !((cycle[0] == "a" && cycle[1] == "b" && cycle[2] == "a") ||
+		(cycle[0] == "b" && cycle[1] == "a" && cycle[2] == "b")) {
+		t.Errorf("unexpected cycle path: %v", cycle)
+	}
+}
+
+// TestCycleDetector_SelfCycle tests detection of a node depending on itself
+func TestCycleDetector_SelfCycle(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "a", DeclaredDeps: []string{"a"}},
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) != 1 {
+		t.Fatalf("expected 1 cycle, got %d: %v", len(cycles), cycles)
+	}
+
+	// Verify cycle is [a, a]
+	cycle := cycles[0]
+	if len(cycle) != 2 {
+		t.Errorf("expected cycle length 2, got %d: %v", len(cycle), cycle)
+	}
+	if cycle[0] != "a" || cycle[1] != "a" {
+		t.Errorf("expected [a, a], got %v", cycle)
+	}
+}
+
+// TestCycleDetector_LongCycle tests detection of a 3+ node cycle
+func TestCycleDetector_LongCycle(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "a", DeclaredDeps: []string{"b"}},
+		{NodeID: "b", DeclaredDeps: []string{"c"}},
+		{NodeID: "c", DeclaredDeps: []string{"a"}},
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) != 1 {
+		t.Fatalf("expected 1 cycle, got %d: %v", len(cycles), cycles)
+	}
+
+	// Verify cycle length is 4 (a → b → c → a)
+	cycle := cycles[0]
+	if len(cycle) != 4 {
+		t.Errorf("expected cycle length 4, got %d: %v", len(cycle), cycle)
+	}
+
+	// Verify the cycle is valid (first and last are the same)
+	if cycle[0] != cycle[len(cycle)-1] {
+		t.Errorf("cycle should start and end with same node: %v", cycle)
+	}
+}
+
+// TestCycleDetector_MultipleCycles tests detection of multiple independent cycles
+func TestCycleDetector_MultipleCycles(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "a", DeclaredDeps: []string{"b"}},
+		{NodeID: "b", DeclaredDeps: []string{"a"}},
+		{NodeID: "c", DeclaredDeps: []string{"d"}},
+		{NodeID: "d", DeclaredDeps: []string{"c"}},
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) != 2 {
+		t.Fatalf("expected 2 cycles, got %d: %v", len(cycles), cycles)
+	}
+
+	// Verify both cycles are valid
+	for i, cycle := range cycles {
+		if len(cycle) < 2 {
+			t.Errorf("cycle %d has invalid length %d: %v", i, len(cycle), cycle)
+		}
+		if cycle[0] != cycle[len(cycle)-1] {
+			t.Errorf("cycle %d should start and end with same node: %v", i, cycle)
+		}
+	}
+}
+
+// TestCycleDetector_NoCycles tests that acyclic graphs return no cycles
+func TestCycleDetector_NoCycles(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "a", DeclaredDeps: []string{"b"}},
+		{NodeID: "b", DeclaredDeps: []string{"c"}},
+		{NodeID: "c", DeclaredDeps: []string{}},
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) != 0 {
+		t.Errorf("expected no cycles, got %d: %v", len(cycles), cycles)
+	}
+}
+
+// TestCycleDetector_DiamondPattern tests that diamond dependency (no cycle) is handled
+func TestCycleDetector_DiamondPattern(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "a", DeclaredDeps: []string{"b", "c"}},
+		{NodeID: "b", DeclaredDeps: []string{"d"}},
+		{NodeID: "c", DeclaredDeps: []string{"d"}},
+		{NodeID: "d", DeclaredDeps: []string{}},
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) != 0 {
+		t.Errorf("expected no cycles in diamond pattern, got %d: %v", len(cycles), cycles)
+	}
+}
+
+// TestCycleDetector_FanoutCycle tests the specific fanout example cycle
+func TestCycleDetector_FanoutCycle(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "config", DeclaredDeps: []string{}},
+		{NodeID: "svc5", DeclaredDeps: []string{"config", "svc5-2"}},
+		{NodeID: "svc5-2", DeclaredDeps: []string{"config", "svc5"}},
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) != 1 {
+		t.Fatalf("expected 1 cycle, got %d: %v", len(cycles), cycles)
+	}
+
+	// Verify cycle contains svc5 and svc5-2
+	cycle := cycles[0]
+	containsSvc5 := false
+	containsSvc5_2 := false
+	for _, node := range cycle {
+		if node == "svc5" {
+			containsSvc5 = true
+		}
+		if node == "svc5-2" {
+			containsSvc5_2 = true
+		}
+	}
+
+	if !containsSvc5 || !containsSvc5_2 {
+		t.Errorf("cycle should contain both svc5 and svc5-2: %v", cycle)
+	}
+
+	// Verify cycle starts and ends with same node
+	if cycle[0] != cycle[len(cycle)-1] {
+		t.Errorf("cycle should start and end with same node: %v", cycle)
+	}
+}
+
+// TestCycleDetector_MapCyclesToNodes tests mapping cycles to nodes
+func TestCycleDetector_MapCyclesToNodes(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "a", DeclaredDeps: []string{"b"}},
+		{NodeID: "b", DeclaredDeps: []string{"c"}},
+		{NodeID: "c", DeclaredDeps: []string{"a"}},
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) != 1 {
+		t.Fatalf("expected 1 cycle, got %d", len(cycles))
+	}
+
+	nodeCycles := detector.mapCyclesToNodes()
+
+	// All three nodes should be in the map
+	if len(nodeCycles) != 3 {
+		t.Errorf("expected 3 nodes in map, got %d: %v", len(nodeCycles), nodeCycles)
+	}
+
+	// Each node should have 1 cycle
+	for _, node := range []string{"a", "b", "c"} {
+		if _, found := nodeCycles[node]; !found {
+			t.Errorf("node %q not found in nodeCycles map", node)
+		}
+		if len(nodeCycles[node]) != 1 {
+			t.Errorf("node %q should have 1 cycle, got %d", node, len(nodeCycles[node]))
+		}
+	}
+}
+
+// TestCycleDetector_ComplexGraph tests a more complex graph with multiple paths
+func TestCycleDetector_ComplexGraph(t *testing.T) {
+	results := []AnalysisResult{
+		{NodeID: "a", DeclaredDeps: []string{"b", "c"}},
+		{NodeID: "b", DeclaredDeps: []string{"d"}},
+		{NodeID: "c", DeclaredDeps: []string{"d"}},
+		{NodeID: "d", DeclaredDeps: []string{"e"}},
+		{NodeID: "e", DeclaredDeps: []string{"a"}}, // Creates cycle: a → b → d → e → a
+	}
+
+	detector := newCycleDetector(results)
+	cycles := detector.detectCycles()
+
+	if len(cycles) == 0 {
+		t.Fatal("expected at least 1 cycle in complex graph")
+	}
+
+	// Verify all cycles are valid
+	for i, cycle := range cycles {
+		if len(cycle) < 2 {
+			t.Errorf("cycle %d has invalid length %d: %v", i, len(cycle), cycle)
+		}
+		if cycle[0] != cycle[len(cycle)-1] {
+			t.Errorf("cycle %d should start and end with same node: %v", i, cycle)
+		}
+	}
+}

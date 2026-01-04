@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -34,17 +33,22 @@ type AnalysisResult struct {
 	// Unused are dependencies declared but never used.
 	// These indicate dead code or missing implementation.
 	Unused []string
+
+	// Cycles are circular dependency paths this node participates in.
+	// Each cycle is represented as a path of node IDs forming a loop.
+	// For example: ["svc5", "svc5-2", "svc5"] indicates svc5 → svc5-2 → svc5.
+	Cycles [][]string
 }
 
-// HasIssues returns true if there are undeclared or unused dependencies.
+// HasIssues returns true if there are undeclared, unused dependencies, or cycles.
 func (r AnalysisResult) HasIssues() bool {
-	return len(r.Undeclared) > 0 || len(r.Unused) > 0
+	return len(r.Undeclared) > 0 || len(r.Unused) > 0 || len(r.Cycles) > 0
 }
 
 // String returns a human-readable summary of issues.
 //
 // Returns "NodeID: OK" if there are no issues, otherwise returns
-// a summary of undeclared and unused dependencies.
+// a summary of undeclared, unused dependencies, and cycles.
 func (r AnalysisResult) String() string {
 	if !r.HasIssues() {
 		return fmt.Sprintf("%s: OK", r.NodeID)
@@ -57,6 +61,13 @@ func (r AnalysisResult) String() string {
 	if len(r.Unused) > 0 {
 		parts = append(parts, fmt.Sprintf("unused deps: %v", r.Unused))
 	}
+	if len(r.Cycles) > 0 {
+		var cycleStrs []string
+		for _, cycle := range r.Cycles {
+			cycleStrs = append(cycleStrs, strings.Join(cycle, " → "))
+		}
+		parts = append(parts, fmt.Sprintf("cycles: [%s]", strings.Join(cycleStrs, ", ")))
+	}
 	return fmt.Sprintf("%s (%s): %s", r.NodeID, r.File, strings.Join(parts, "; "))
 }
 
@@ -66,9 +77,16 @@ var AnalyzeDirDebug = false
 
 // AnalyzeDir analyzes all Go files in a directory for dependency correctness.
 //
-// It recursively walks the directory, parsing each .go file (excluding _test.go)
-// and extracting graft.Node[T] definitions. For each node found, it compares
-// declared dependencies against actual Dep[T] usage.
+// This function uses type-aware analysis with go/packages and go/ssa to accurately
+// detect dependency issues. It discovers all graft.Node[T] registrations in the
+// directory and compares declared dependencies (in DependsOn) against actual
+// Dep[T] usage in Run functions.
+//
+// The type-aware approach is more robust than AST-based pattern matching:
+//   - Handles type aliases correctly
+//   - Resolves package imports accurately
+//   - Works with various code structures (dependencies in same package, etc.)
+//   - Uses SSA for precise dataflow analysis
 //
 // Returns all nodes found with their analysis results. Use [AnalysisResult.HasIssues]
 // to filter for problems.
@@ -85,68 +103,31 @@ var AnalyzeDirDebug = false
 //	    }
 //	}
 func AnalyzeDir(dir string) ([]AnalysisResult, error) {
-	var results []AnalysisResult
-
-	if AnalyzeDirDebug {
-		absDir, _ := filepath.Abs(dir)
-		fmt.Printf("[ANALYZE DEBUG] Walking directory: %s (abs: %s)\n", dir, absDir)
+	cfg := AnalyzerConfig{
+		WorkDir: dir,
+		Debug:   AnalyzeDirDebug,
 	}
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			if AnalyzeDirDebug {
-				fmt.Printf("[ANALYZE DEBUG] Walk error at %s: %v\n", path, err)
-			}
-			return err
-		}
-		if info.IsDir() {
-			if AnalyzeDirDebug {
-				fmt.Printf("[ANALYZE DEBUG] Entering directory: %s\n", path)
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-		if strings.HasSuffix(path, "_test.go") {
-			if AnalyzeDirDebug {
-				fmt.Printf("[ANALYZE DEBUG] Skipping test file: %s\n", path)
-			}
-			return nil
-		}
-
-		if AnalyzeDirDebug {
-			fmt.Printf("[ANALYZE DEBUG] Analyzing file: %s\n", path)
-		}
-
-		fileResults, err := AnalyzeFile(path)
-		if err != nil {
-			return fmt.Errorf("analyzing %s: %w", path, err)
-		}
-
-		if AnalyzeDirDebug {
-			fmt.Printf("[ANALYZE DEBUG]   Found %d node(s) in %s\n", len(fileResults), path)
-			for _, r := range fileResults {
-				fmt.Printf("[ANALYZE DEBUG]   - Node %q: declared=%v, used=%v\n", r.NodeID, r.DeclaredDeps, r.UsedDeps)
-			}
-		}
-
-		results = append(results, fileResults...)
-		return nil
-	})
-
-	return results, err
+	analyzer := newTypeAwareAnalyzer(cfg)
+	return analyzer.Analyze(dir)
 }
 
 // AnalyzeFile analyzes a single Go file for graft.Node[T] dependency correctness.
 //
-// Parses the file's AST and finds all graft.Node[T] composite literals.
+// Deprecated: AnalyzeFile uses AST-based pattern matching which is less accurate
+// than type-aware analysis. Use [AnalyzeDir] instead, which uses go/packages and
+// go/ssa for more robust dependency validation. AnalyzeFile is kept for backward
+// compatibility but may be removed in a future version.
+//
+// AnalyzeFile parses the file's AST and finds all graft.Node[T] composite literals.
 // For each node, it extracts:
 //   - The ID field value
 //   - Dependencies from DependsOn
 //   - Dependencies used via Dep[T] calls in the Run function
 //
 // Returns one AnalysisResult per node found in the file.
+//
+// Note: This function has limitations with type aliases, package imports, and
+// complex code structures. Use [AnalyzeDir] for more accurate results.
 func AnalyzeFile(path string) ([]AnalysisResult, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
