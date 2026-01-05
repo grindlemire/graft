@@ -86,6 +86,9 @@ var AnalyzeDirDebug = false
 //   - Works with various code structures (dependencies in same package, etc.)
 //   - Uses SSA for precise dataflow analysis
 //
+// Uses two passes: first collects all node registrations to build a type registry,
+// then analyzes each node's dependencies using that registry.
+//
 // Returns all nodes found with their analysis results. Use [AnalysisResult.HasIssues]
 // to filter for problems.
 //
