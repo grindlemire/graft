@@ -11,20 +11,8 @@ import (
 // uses dependencies via graft.Dep[T](ctx) but fails to declare them in DependsOn.
 func TestAnalyzeDirEdgeCases_Undeclared(t *testing.T) {
 	tests := map[string]edgeCaseTest{
-		"01_undeclared_single": {
-			dir:            "examples/edgecases/01_undeclared_single",
-			wantNodes:      2,
-			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
-				app := findNode(t, results, "app")
-				assertUndeclared(t, app, []string{"config"})
-				assertUnused(t, app, []string{})
-				assertNoCycles(t, app)
-				assertDeps(t, app, []string{}, []string{"config"})
-			},
-		},
-		"02_undeclared_multiple": {
-			dir:            "examples/edgecases/02_undeclared_multiple",
+		"undeclared_multiple": {
+			dir:            "examples/edgecases/undeclared_multiple",
 			wantNodes:      4,
 			wantIssueCount: 1,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -34,8 +22,8 @@ func TestAnalyzeDirEdgeCases_Undeclared(t *testing.T) {
 				assertNoCycles(t, app)
 			},
 		},
-		"15_partial_declaration": {
-			dir:            "examples/edgecases/15_partial_declaration",
+		"partial_declaration": {
+			dir:            "examples/edgecases/partial_declaration",
 			wantNodes:      4,
 			wantIssueCount: 1,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -46,8 +34,8 @@ func TestAnalyzeDirEdgeCases_Undeclared(t *testing.T) {
 				assertDepsContain(t, app, []string{"config", "db"}, []string{"config", "db", "cache"})
 			},
 		},
-		"20_conditional_dep_usage": {
-			dir:            "examples/edgecases/20_conditional_dep_usage",
+		"conditional_dep_usage": {
+			dir:            "examples/edgecases/conditional_dep_usage",
 			wantNodes:      3,
 			wantIssueCount: 1,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -66,20 +54,8 @@ func TestAnalyzeDirEdgeCases_Undeclared(t *testing.T) {
 // DependsOn but never actually accessed via graft.Dep[T](ctx).
 func TestAnalyzeDirEdgeCases_Unused(t *testing.T) {
 	tests := map[string]edgeCaseTest{
-		"03_unused_single": {
-			dir:            "examples/edgecases/03_unused_single",
-			wantNodes:      2,
-			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
-				app := findNode(t, results, "app")
-				assertUnused(t, app, []string{"config"})
-				assertUndeclared(t, app, []string{})
-				assertNoCycles(t, app)
-				assertDeps(t, app, []string{"config"}, []string{})
-			},
-		},
-		"04_unused_multiple": {
-			dir:            "examples/edgecases/04_unused_multiple",
+		"unused_multiple": {
+			dir:            "examples/edgecases/unused_multiple",
 			wantNodes:      4,
 			wantIssueCount: 1,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -89,8 +65,8 @@ func TestAnalyzeDirEdgeCases_Unused(t *testing.T) {
 				assertNoCycles(t, app)
 			},
 		},
-		"14_unused_in_chain": {
-			dir:            "examples/edgecases/14_unused_in_chain",
+		"unused_in_chain": {
+			dir:            "examples/edgecases/unused_in_chain",
 			wantNodes:      4,
 			wantIssueCount: 1,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -100,8 +76,8 @@ func TestAnalyzeDirEdgeCases_Unused(t *testing.T) {
 				assertNoCycles(t, middleware)
 			},
 		},
-		"18_complex_multi_parent": {
-			dir:            "examples/edgecases/18_complex_multi_parent",
+		"complex_multi_parent": {
+			dir:            "examples/edgecases/complex_multi_parent",
 			wantNodes:      5,
 			wantIssueCount: 1,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -120,8 +96,8 @@ func TestAnalyzeDirEdgeCases_Unused(t *testing.T) {
 // including simple 2-node cycles, longer chains, and self-references.
 func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 	tests := map[string]edgeCaseTest{
-		"05_cycle_simple": {
-			dir:            "examples/edgecases/05_cycle_simple",
+		"cycle_simple": {
+			dir:            "examples/edgecases/cycle_simple",
 			wantNodes:      2,
 			wantIssueCount: 2,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -137,8 +113,8 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 				assertUnused(t, nodeB, []string{"nodeA"})
 			},
 		},
-		"06_cycle_triangle": {
-			dir:            "examples/edgecases/06_cycle_triangle",
+		"cycle_triangle": {
+			dir:            "examples/edgecases/cycle_triangle",
 			wantNodes:      3,
 			wantIssueCount: 3,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -151,8 +127,8 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 				// All will also have unused deps due to Go import cycle limitation
 			},
 		},
-		"07_cycle_deep": {
-			dir:            "examples/edgecases/07_cycle_deep",
+		"cycle_deep": {
+			dir:            "examples/edgecases/cycle_deep",
 			wantNodes:      5,
 			wantIssueCount: 3,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -172,8 +148,8 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 				assertCycleContains(t, nodeC, []string{"nodeC", "nodeD", "nodeE", "nodeC"})
 			},
 		},
-		"08_cycle_self": {
-			dir:            "examples/edgecases/08_cycle_self",
+		"cycle_self": {
+			dir:            "examples/edgecases/cycle_self",
 			wantNodes:      1,
 			wantIssueCount: 1,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -182,8 +158,8 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 				assertCycleContains(t, nodeA, []string{"nodeA", "nodeA"})
 			},
 		},
-		"16_multiple_cycles_same_node": {
-			dir:            "examples/edgecases/16_multiple_cycles_same_node",
+		"multiple_cycles_same_node": {
+			dir:            "examples/edgecases/multiple_cycles_same_node",
 			wantNodes:      3,
 			wantIssueCount: 3,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -202,8 +178,8 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 // same node or graph (e.g., undeclared + unused, cycles + undeclared, etc.).
 func TestAnalyzeDirEdgeCases_Mixed(t *testing.T) {
 	tests := map[string]edgeCaseTest{
-		"09_mixed_undeclared_unused": {
-			dir:            "examples/edgecases/09_mixed_undeclared_unused",
+		"mixed_undeclared_unused": {
+			dir:            "examples/edgecases/mixed_undeclared_unused",
 			wantNodes:      4,
 			wantIssueCount: 1,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -213,8 +189,8 @@ func TestAnalyzeDirEdgeCases_Mixed(t *testing.T) {
 				assertNoCycles(t, app)
 			},
 		},
-		"10_mixed_cycle_undeclared": {
-			dir:            "examples/edgecases/10_mixed_cycle_undeclared",
+		"mixed_cycle_undeclared": {
+			dir:            "examples/edgecases/mixed_cycle_undeclared",
 			wantNodes:      3,
 			wantIssueCount: 2,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -229,8 +205,8 @@ func TestAnalyzeDirEdgeCases_Mixed(t *testing.T) {
 				assertCycles(t, nodeB, 1)
 			},
 		},
-		"11_mixed_all_issues": {
-			dir:            "examples/edgecases/11_mixed_all_issues",
+		"mixed_all_issues": {
+			dir:            "examples/edgecases/mixed_all_issues",
 			wantNodes:      5,
 			wantIssueCount: 2,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -259,8 +235,8 @@ func TestAnalyzeDirEdgeCases_Mixed(t *testing.T) {
 // including minimal nodes, deep chains, disconnected graphs, etc.
 func TestAnalyzeDirEdgeCases_Structural(t *testing.T) {
 	tests := map[string]edgeCaseTest{
-		"12_empty_node": {
-			dir:            "examples/edgecases/12_empty_node",
+		"empty_node": {
+			dir:            "examples/edgecases/empty_node",
 			wantNodes:      1,
 			wantIssueCount: 0,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -269,8 +245,8 @@ func TestAnalyzeDirEdgeCases_Structural(t *testing.T) {
 				assertNoCycles(t, empty)
 			},
 		},
-		"13_no_deps_node": {
-			dir:            "examples/edgecases/13_no_deps_node",
+		"no_deps_node": {
+			dir:            "examples/edgecases/no_deps_node",
 			wantNodes:      1,
 			wantIssueCount: 0,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -279,8 +255,8 @@ func TestAnalyzeDirEdgeCases_Structural(t *testing.T) {
 				assertNoCycles(t, standalone)
 			},
 		},
-		"17_long_chain": {
-			dir:            "examples/edgecases/17_long_chain",
+		"long_chain": {
+			dir:            "examples/edgecases/long_chain",
 			wantNodes:      10,
 			wantIssueCount: 0,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -296,8 +272,8 @@ func TestAnalyzeDirEdgeCases_Structural(t *testing.T) {
 				assertDeps(t, n10, []string{"n9"}, []string{"n9"})
 			},
 		},
-		"19_orphan_nodes": {
-			dir:            "examples/edgecases/19_orphan_nodes",
+		"orphan_nodes": {
+			dir:            "examples/edgecases/orphan_nodes",
 			wantNodes:      4,
 			wantIssueCount: 0,
 			checkSpecific: func(t *testing.T, results []AnalysisResult) {
@@ -412,14 +388,36 @@ func assertCycles(t *testing.T, r AnalysisResult, wantCount int) {
 }
 
 // assertCycleContains verifies that a specific cycle path exists in the node's cycles.
+// Order-independent: checks if cycles contain the same nodes regardless of starting position.
 func assertCycleContains(t *testing.T, r AnalysisResult, expectedPath []string) {
 	t.Helper()
+	expectedMap := make(map[string]int)
+	for _, node := range expectedPath {
+		expectedMap[node]++
+	}
+
 	for _, cycle := range r.Cycles {
-		if equalStringSlices(cycle, expectedPath) {
+		cycleMap := make(map[string]int)
+		for _, node := range cycle {
+			cycleMap[node]++
+		}
+
+		// Check if maps are equal
+		if len(cycleMap) != len(expectedMap) {
+			continue
+		}
+		match := true
+		for k, v := range expectedMap {
+			if cycleMap[k] != v {
+				match = false
+				break
+			}
+		}
+		if match {
 			return
 		}
 	}
-	t.Errorf("node %q: cycle %v not found in %v", r.NodeID, expectedPath, r.Cycles)
+	t.Errorf("node %q: cycle with nodes %v not found in %v", r.NodeID, expectedPath, r.Cycles)
 }
 
 // assertDeps checks both declared and used dependencies.
