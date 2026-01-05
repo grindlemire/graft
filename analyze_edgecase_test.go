@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/grindlemire/graft/internal/typeaware"
 )
 
 // TestAnalyzeDirEdgeCases_Undeclared tests detection of undeclared dependencies.
@@ -15,7 +17,7 @@ func TestAnalyzeDirEdgeCases_Undeclared(t *testing.T) {
 			dir:            "examples/edgecases/undeclared_multiple",
 			wantNodes:      4,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				app := findNode(t, results, "app")
 				assertUndeclaredContains(t, app, []string{"config", "db", "cache"})
 				assertUnused(t, app, []string{})
@@ -26,7 +28,7 @@ func TestAnalyzeDirEdgeCases_Undeclared(t *testing.T) {
 			dir:            "examples/edgecases/partial_declaration",
 			wantNodes:      4,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				app := findNode(t, results, "app")
 				assertUndeclared(t, app, []string{"cache"})
 				assertUnused(t, app, []string{})
@@ -38,7 +40,7 @@ func TestAnalyzeDirEdgeCases_Undeclared(t *testing.T) {
 			dir:            "examples/edgecases/conditional_dep_usage",
 			wantNodes:      3,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				app := findNode(t, results, "app")
 				// Type-aware analysis via SSA should catch conditional usage
 				assertUndeclared(t, app, []string{"feature"})
@@ -58,7 +60,7 @@ func TestAnalyzeDirEdgeCases_Unused(t *testing.T) {
 			dir:            "examples/edgecases/unused_multiple",
 			wantNodes:      4,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				app := findNode(t, results, "app")
 				assertUnusedContains(t, app, []string{"config", "db", "cache"})
 				assertUndeclared(t, app, []string{})
@@ -69,7 +71,7 @@ func TestAnalyzeDirEdgeCases_Unused(t *testing.T) {
 			dir:            "examples/edgecases/unused_in_chain",
 			wantNodes:      4,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				middleware := findNode(t, results, "middleware")
 				assertUnused(t, middleware, []string{"db"})
 				assertUndeclared(t, middleware, []string{})
@@ -80,7 +82,7 @@ func TestAnalyzeDirEdgeCases_Unused(t *testing.T) {
 			dir:            "examples/edgecases/complex_multi_parent",
 			wantNodes:      5,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				aggregator := findNode(t, results, "aggregator")
 				assertUnused(t, aggregator, []string{"serviceC"})
 				assertNoCycles(t, aggregator)
@@ -100,7 +102,7 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 			dir:            "examples/edgecases/cycle_simple",
 			wantNodes:      2,
 			wantIssueCount: 2,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				nodeA := findNode(t, results, "nodeA")
 				nodeB := findNode(t, results, "nodeB")
 				assertCycles(t, nodeA, 1)
@@ -117,7 +119,7 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 			dir:            "examples/edgecases/cycle_triangle",
 			wantNodes:      3,
 			wantIssueCount: 3,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				nodeA := findNode(t, results, "nodeA")
 				nodeB := findNode(t, results, "nodeB")
 				nodeC := findNode(t, results, "nodeC")
@@ -131,7 +133,7 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 			dir:            "examples/edgecases/cycle_deep",
 			wantNodes:      5,
 			wantIssueCount: 3,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				// Only nodeC, nodeD, nodeE should be in the cycle
 				nodeA := findNode(t, results, "nodeA")
 				nodeB := findNode(t, results, "nodeB")
@@ -152,7 +154,7 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 			dir:            "examples/edgecases/cycle_self",
 			wantNodes:      1,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				nodeA := findNode(t, results, "nodeA")
 				assertCycles(t, nodeA, 1)
 				assertCycleContains(t, nodeA, []string{"nodeA", "nodeA"})
@@ -162,7 +164,7 @@ func TestAnalyzeDirEdgeCases_Cycles(t *testing.T) {
 			dir:            "examples/edgecases/multiple_cycles_same_node",
 			wantNodes:      3,
 			wantIssueCount: 3,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				hub := findNode(t, results, "hub")
 				// Hub participates in 2 cycles
 				assertCycles(t, hub, 2)
@@ -182,7 +184,7 @@ func TestAnalyzeDirEdgeCases_Mixed(t *testing.T) {
 			dir:            "examples/edgecases/mixed_undeclared_unused",
 			wantNodes:      4,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				app := findNode(t, results, "app")
 				assertUndeclared(t, app, []string{"cache"})
 				assertUnusedContains(t, app, []string{"config", "db"})
@@ -193,7 +195,7 @@ func TestAnalyzeDirEdgeCases_Mixed(t *testing.T) {
 			dir:            "examples/edgecases/mixed_cycle_undeclared",
 			wantNodes:      3,
 			wantIssueCount: 2,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				nodeA := findNode(t, results, "nodeA")
 				nodeB := findNode(t, results, "nodeB")
 
@@ -209,7 +211,7 @@ func TestAnalyzeDirEdgeCases_Mixed(t *testing.T) {
 			dir:            "examples/edgecases/mixed_all_issues",
 			wantNodes:      5,
 			wantIssueCount: 2,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				nodeA := findNode(t, results, "nodeA")
 				nodeB := findNode(t, results, "nodeB")
 
@@ -239,7 +241,7 @@ func TestAnalyzeDirEdgeCases_Structural(t *testing.T) {
 			dir:            "examples/edgecases/empty_node",
 			wantNodes:      1,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				empty := findNode(t, results, "empty")
 				assertDeps(t, empty, []string{}, []string{})
 				assertNoCycles(t, empty)
@@ -249,7 +251,7 @@ func TestAnalyzeDirEdgeCases_Structural(t *testing.T) {
 			dir:            "examples/edgecases/no_deps_node",
 			wantNodes:      1,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				standalone := findNode(t, results, "standalone")
 				assertDeps(t, standalone, []string{}, []string{})
 				assertNoCycles(t, standalone)
@@ -259,7 +261,7 @@ func TestAnalyzeDirEdgeCases_Structural(t *testing.T) {
 			dir:            "examples/edgecases/long_chain",
 			wantNodes:      10,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				// Verify no cycles in any node
 				for _, r := range results {
 					assertNoCycles(t, r)
@@ -276,7 +278,7 @@ func TestAnalyzeDirEdgeCases_Structural(t *testing.T) {
 			dir:            "examples/edgecases/orphan_nodes",
 			wantNodes:      4,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				// Two independent subgraphs, both should be valid
 				for _, r := range results {
 					if r.HasIssues() {
@@ -295,7 +297,7 @@ type edgeCaseTest struct {
 	dir            string
 	wantNodes      int
 	wantIssueCount int
-	checkSpecific  func(t *testing.T, results []AnalysisResult)
+	checkSpecific  func(t *testing.T, results []typeaware.Result)
 }
 
 // runEdgeCaseTests is the common test runner for all edge case tests.
@@ -344,7 +346,7 @@ func runEdgeCaseTests(t *testing.T, tests map[string]edgeCaseTest) {
 }
 
 // findNode finds a node by ID in the results, failing the test if not found.
-func findNode(t *testing.T, results []AnalysisResult, id string) AnalysisResult {
+func findNode(t *testing.T, results []typeaware.Result, id string) typeaware.Result {
 	t.Helper()
 	for _, r := range results {
 		if r.NodeID == id {
@@ -352,11 +354,11 @@ func findNode(t *testing.T, results []AnalysisResult, id string) AnalysisResult 
 		}
 	}
 	t.Fatalf("node %q not found in results", id)
-	return AnalysisResult{}
+	return typeaware.Result{}
 }
 
 // assertUndeclared checks that undeclared dependencies exactly match the expected list.
-func assertUndeclared(t *testing.T, r AnalysisResult, want []string) {
+func assertUndeclared(t *testing.T, r typeaware.Result, want []string) {
 	t.Helper()
 	if !equalStringSlices(r.Undeclared, want) {
 		t.Errorf("node %q: undeclared = %v, want %v", r.NodeID, r.Undeclared, want)
@@ -364,7 +366,7 @@ func assertUndeclared(t *testing.T, r AnalysisResult, want []string) {
 }
 
 // assertUnused checks that unused dependencies exactly match the expected list.
-func assertUnused(t *testing.T, r AnalysisResult, want []string) {
+func assertUnused(t *testing.T, r typeaware.Result, want []string) {
 	t.Helper()
 	if !equalStringSlices(r.Unused, want) {
 		t.Errorf("node %q: unused = %v, want %v", r.NodeID, r.Unused, want)
@@ -372,7 +374,7 @@ func assertUnused(t *testing.T, r AnalysisResult, want []string) {
 }
 
 // assertNoCycles verifies that a node has no cycles.
-func assertNoCycles(t *testing.T, r AnalysisResult) {
+func assertNoCycles(t *testing.T, r typeaware.Result) {
 	t.Helper()
 	if len(r.Cycles) > 0 {
 		t.Errorf("node %q: expected no cycles, got %v", r.NodeID, r.Cycles)
@@ -380,7 +382,7 @@ func assertNoCycles(t *testing.T, r AnalysisResult) {
 }
 
 // assertCycles checks that a node has the expected number of cycles.
-func assertCycles(t *testing.T, r AnalysisResult, wantCount int) {
+func assertCycles(t *testing.T, r typeaware.Result, wantCount int) {
 	t.Helper()
 	if len(r.Cycles) != wantCount {
 		t.Errorf("node %q: got %d cycles, want %d; cycles: %v", r.NodeID, len(r.Cycles), wantCount, r.Cycles)
@@ -389,7 +391,7 @@ func assertCycles(t *testing.T, r AnalysisResult, wantCount int) {
 
 // assertCycleContains verifies that a specific cycle path exists in the node's cycles.
 // Handles cycle rotations: [A B C A] and [B C A B] are considered the same cycle.
-func assertCycleContains(t *testing.T, r AnalysisResult, expectedPath []string) {
+func assertCycleContains(t *testing.T, r typeaware.Result, expectedPath []string) {
 	t.Helper()
 
 	// Normalize expected path (remove duplicate last element if present)
@@ -446,7 +448,7 @@ func isCycleRotation(cycle1, cycle2 []string) bool {
 }
 
 // assertDeps checks both declared and used dependencies.
-func assertDeps(t *testing.T, r AnalysisResult, wantDeclared, wantUsed []string) {
+func assertDeps(t *testing.T, r typeaware.Result, wantDeclared, wantUsed []string) {
 	t.Helper()
 	if !equalStringSlices(r.DeclaredDeps, wantDeclared) {
 		t.Errorf("node %q: declared = %v, want %v", r.NodeID, r.DeclaredDeps, wantDeclared)
@@ -457,7 +459,7 @@ func assertDeps(t *testing.T, r AnalysisResult, wantDeclared, wantUsed []string)
 }
 
 // assertDepsContain checks that dependencies contain at least the specified items.
-func assertDepsContain(t *testing.T, r AnalysisResult, wantDeclared, wantUsed []string) {
+func assertDepsContain(t *testing.T, r typeaware.Result, wantDeclared, wantUsed []string) {
 	t.Helper()
 	if !containsAll(r.DeclaredDeps, wantDeclared) {
 		t.Errorf("node %q: declared %v does not contain all of %v", r.NodeID, r.DeclaredDeps, wantDeclared)
@@ -468,7 +470,7 @@ func assertDepsContain(t *testing.T, r AnalysisResult, wantDeclared, wantUsed []
 }
 
 // assertUndeclaredContains checks that undeclared contains all specified items.
-func assertUndeclaredContains(t *testing.T, r AnalysisResult, items []string) {
+func assertUndeclaredContains(t *testing.T, r typeaware.Result, items []string) {
 	t.Helper()
 	if len(r.Undeclared) != len(items) {
 		t.Errorf("node %q: undeclared has %d items, want %d; got %v", r.NodeID, len(r.Undeclared), len(items), r.Undeclared)
@@ -479,7 +481,7 @@ func assertUndeclaredContains(t *testing.T, r AnalysisResult, items []string) {
 }
 
 // assertUnusedContains checks that unused contains all specified items.
-func assertUnusedContains(t *testing.T, r AnalysisResult, items []string) {
+func assertUnusedContains(t *testing.T, r typeaware.Result, items []string) {
 	t.Helper()
 	if len(r.Unused) != len(items) {
 		t.Errorf("node %q: unused has %d items, want %d; got %v", r.NodeID, len(r.Unused), len(items), r.Unused)

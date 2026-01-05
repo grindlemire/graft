@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/grindlemire/graft/internal/typeaware"
 )
 
 // TestAnalyzeDirEdgeCases_TypeVariations tests that the analyzer correctly handles
@@ -14,7 +16,7 @@ func TestAnalyzeDirEdgeCases_TypeVariations(t *testing.T) {
 			dir:            "examples/edgecases/primitive_string",
 			wantNodes:      2,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				producer := findNode(t, results, "str")
 				consumer := findNode(t, results, "app")
 				assertNoCycles(t, producer)
@@ -27,7 +29,7 @@ func TestAnalyzeDirEdgeCases_TypeVariations(t *testing.T) {
 			dir:            "examples/edgecases/primitive_int",
 			wantNodes:      2,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				producer := findNode(t, results, "port")
 				consumer := findNode(t, results, "server")
 				assertNoCycles(t, producer)
@@ -40,7 +42,7 @@ func TestAnalyzeDirEdgeCases_TypeVariations(t *testing.T) {
 			dir:            "examples/edgecases/slice_type",
 			wantNodes:      2,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				producer := findNode(t, results, "tags")
 				consumer := findNode(t, results, "app")
 				assertNoCycles(t, producer)
@@ -53,7 +55,7 @@ func TestAnalyzeDirEdgeCases_TypeVariations(t *testing.T) {
 			dir:            "examples/edgecases/type_alias_match",
 			wantNodes:      2,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				producer := findNode(t, results, "uid")
 				consumer := findNode(t, results, "app")
 				// Type alias should resolve correctly
@@ -66,7 +68,7 @@ func TestAnalyzeDirEdgeCases_TypeVariations(t *testing.T) {
 			dir:            "examples/edgecases/aliased_import",
 			wantNodes:      2,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				producer := findNode(t, results, "config")
 				consumer := findNode(t, results, "app")
 				// Import alias should not affect type resolution
@@ -89,7 +91,7 @@ func TestAnalyzeDirEdgeCases_SamePackage(t *testing.T) {
 			dir:            "examples/edgecases/same_package_deps",
 			wantNodes:      3,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				config := findNode(t, results, "config")
 				db := findNode(t, results, "db")
 				app := findNode(t, results, "app")
@@ -108,7 +110,7 @@ func TestAnalyzeDirEdgeCases_SamePackage(t *testing.T) {
 			dir:            "examples/edgecases/multiple_nodes_same_file",
 			wantNodes:      3,
 			wantIssueCount: 0,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				// All 3 nodes in single file should be discovered
 				nodeA := findNode(t, results, "nodeA")
 				nodeB := findNode(t, results, "nodeB")
@@ -137,7 +139,7 @@ func TestAnalyzeDirEdgeCases_TypeMismatches(t *testing.T) {
 			dir:            "examples/edgecases/pointer_mismatch",
 			wantNodes:      2,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				consumer := findNode(t, results, "consumer")
 				// Producer outputs *Config, consumer declares "config" but tries Dep[Config]
 				// Dep[Config] won't match *Config, so "config" is unused
@@ -149,7 +151,7 @@ func TestAnalyzeDirEdgeCases_TypeMismatches(t *testing.T) {
 			dir:            "examples/edgecases/named_type_no_match",
 			wantNodes:      2,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				consumer := findNode(t, results, "consumer")
 				// Producer outputs Port, consumer declares "port" but tries Dep[int]
 				// Dep[int] won't match Port (distinct types), so "port" is unused
@@ -161,7 +163,7 @@ func TestAnalyzeDirEdgeCases_TypeMismatches(t *testing.T) {
 			dir:            "examples/edgecases/pointer_direction_mismatch",
 			wantNodes:      2,
 			wantIssueCount: 1,
-			checkSpecific: func(t *testing.T, results []AnalysisResult) {
+			checkSpecific: func(t *testing.T, results []typeaware.Result) {
 				consumer := findNode(t, results, "consumer")
 				// Producer outputs Config, consumer declares "config" but tries Dep[*Config]
 				// Dep[*Config] won't match Config, so "config" is unused

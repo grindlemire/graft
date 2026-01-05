@@ -3,6 +3,8 @@ package graft
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/grindlemire/graft/internal/typeaware"
 )
 
 // TestAnalyzeDirIntegration tests the type-aware analyzer on real example projects.
@@ -12,7 +14,7 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 		dir        string
 		wantNodes  int
 		wantIssues int
-		checkNodes func(t *testing.T, results []AnalysisResult)
+		checkNodes func(t *testing.T, results []typeaware.Result)
 	}
 
 	tests := map[string]tc{
@@ -20,9 +22,9 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 			dir:        "examples/simple",
 			wantNodes:  3, // config, db, app
 			wantIssues: 0,
-			checkNodes: func(t *testing.T, results []AnalysisResult) {
+			checkNodes: func(t *testing.T, results []typeaware.Result) {
 				// Map results by node ID for easier checking
-				nodeMap := make(map[string]AnalysisResult)
+				nodeMap := make(map[string]typeaware.Result)
 				for _, r := range results {
 					nodeMap[r.NodeID] = r
 				}
@@ -74,7 +76,7 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 			dir:        "examples/complex",
 			wantNodes:  9, // env, logger, secrets, auth, admin, cfg, db, user, gateway
 			wantIssues: 0,
-			checkNodes: func(t *testing.T, results []AnalysisResult) {
+			checkNodes: func(t *testing.T, results []typeaware.Result) {
 				// Verify all nodes have no issues
 				for _, r := range results {
 					if r.HasIssues() {
@@ -103,8 +105,8 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 			dir:        "examples/diamond",
 			wantNodes:  4, // config, cache, db, api
 			wantIssues: 0,
-			checkNodes: func(t *testing.T, results []AnalysisResult) {
-				nodeMap := make(map[string]AnalysisResult)
+			checkNodes: func(t *testing.T, results []typeaware.Result) {
+				nodeMap := make(map[string]typeaware.Result)
 				for _, r := range results {
 					nodeMap[r.NodeID] = r
 					if r.HasIssues() {
@@ -132,8 +134,8 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 			dir:        "examples/fanout",
 			wantNodes:  7, // config, svc1-5, aggregator
 			wantIssues: 0,
-			checkNodes: func(t *testing.T, results []AnalysisResult) {
-				nodeMap := make(map[string]AnalysisResult)
+			checkNodes: func(t *testing.T, results []typeaware.Result) {
+				nodeMap := make(map[string]typeaware.Result)
 				for _, r := range results {
 					nodeMap[r.NodeID] = r
 				}
@@ -168,8 +170,8 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 			dir:        "examples/httpserver",
 			wantNodes:  5, // config, request_logger, admin, db, user
 			wantIssues: 0,
-			checkNodes: func(t *testing.T, results []AnalysisResult) {
-				nodeMap := make(map[string]AnalysisResult)
+			checkNodes: func(t *testing.T, results []typeaware.Result) {
+				nodeMap := make(map[string]typeaware.Result)
 				for _, r := range results {
 					nodeMap[r.NodeID] = r
 					if r.HasIssues() {
@@ -362,10 +364,13 @@ func TestTypeAwareAnalyzerAccuracy(t *testing.T) {
 		}
 
 		// Find the db node
-		var dbNode *AnalysisResult
+		var dbNode *typeaware.Result
 		for i := range results {
 			if results[i].NodeID == "db" {
 				dbNode = &results[i]
+				if dbNode == nil {
+					t.Fatal("db node not found in results")
+				}
 				break
 			}
 		}

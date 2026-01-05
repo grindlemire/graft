@@ -3,6 +3,8 @@ package graft
 import (
 	"fmt"
 	"strings"
+
+	"github.com/grindlemire/graft/internal/typeaware"
 )
 
 // AnalysisResult contains the result of analyzing a node's dependency usage.
@@ -98,12 +100,12 @@ var AnalyzeDirDebug = false
 //	        fmt.Println(r.String())
 //	    }
 //	}
-func AnalyzeDir(dir string) ([]AnalysisResult, error) {
-	cfg := AnalyzerConfig{
+func AnalyzeDir(dir string) ([]typeaware.Result, error) {
+	cfg := typeaware.Config{
 		WorkDir: dir,
 		Debug:   AnalyzeDirDebug,
 	}
-	analyzer := newTypeAwareAnalyzer(cfg)
+	analyzer := typeaware.New(cfg)
 	return analyzer.Analyze(dir)
 }
 
