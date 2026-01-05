@@ -130,7 +130,7 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 		},
 		"examples/fanout": {
 			dir:        "examples/fanout",
-			wantNodes:  9, // config, shared1-2, svc1-5, aggregator
+			wantNodes:  7, // config, svc1-5, aggregator
 			wantIssues: 0,
 			checkNodes: func(t *testing.T, results []AnalysisResult) {
 				nodeMap := make(map[string]AnalysisResult)
@@ -147,8 +147,8 @@ func TestAnalyzeDirIntegration(t *testing.T) {
 
 				// Verify fanout structure: aggregator depends on all services
 				if aggregator, ok := nodeMap["aggregator"]; ok {
-					if len(aggregator.DeclaredDeps) != 7 {
-						t.Errorf("aggregator: expected 7 declared deps (svc1-5, shared1-2), got %d", len(aggregator.DeclaredDeps))
+					if len(aggregator.DeclaredDeps) != 5 {
+						t.Errorf("aggregator: expected 5 declared deps (svc1-5), got %d", len(aggregator.DeclaredDeps))
 					}
 				}
 
