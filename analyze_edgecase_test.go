@@ -388,36 +388,61 @@ func assertCycles(t *testing.T, r AnalysisResult, wantCount int) {
 }
 
 // assertCycleContains verifies that a specific cycle path exists in the node's cycles.
-// Order-independent: checks if cycles contain the same nodes regardless of starting position.
+// Handles cycle rotations: [A B C A] and [B C A B] are considered the same cycle.
 func assertCycleContains(t *testing.T, r AnalysisResult, expectedPath []string) {
 	t.Helper()
-	expectedMap := make(map[string]int)
-	for _, node := range expectedPath {
-		expectedMap[node]++
-	}
+
+	// Normalize expected path (remove duplicate last element if present)
+	expected := normalizeCyclePath(expectedPath)
 
 	for _, cycle := range r.Cycles {
-		cycleMap := make(map[string]int)
-		for _, node := range cycle {
-			cycleMap[node]++
-		}
+		actual := normalizeCyclePath(cycle)
 
-		// Check if maps are equal
-		if len(cycleMap) != len(expectedMap) {
-			continue
+		// Check if actual is a rotation of expected
+		if isCycleRotation(expected, actual) {
+			return
 		}
+	}
+	t.Errorf("node %q: cycle with nodes %v not found in %v", r.NodeID, expectedPath, r.Cycles)
+}
+
+// normalizeCyclePath removes the duplicate last element from a cycle path
+// [A B C A] -> [A B C]
+func normalizeCyclePath(path []string) []string {
+	if len(path) <= 1 {
+		return path
+	}
+	// If first and last are the same, remove last
+	if path[0] == path[len(path)-1] {
+		return path[:len(path)-1]
+	}
+	return path
+}
+
+// isCycleRotation checks if two cycles are rotations of each other
+// [A B C] and [B C A] are rotations of each other
+func isCycleRotation(cycle1, cycle2 []string) bool {
+	if len(cycle1) != len(cycle2) {
+		return false
+	}
+	if len(cycle1) == 0 {
+		return true
+	}
+
+	// Try all rotations of cycle1 to see if any match cycle2
+	for offset := 0; offset < len(cycle1); offset++ {
 		match := true
-		for k, v := range expectedMap {
-			if cycleMap[k] != v {
+		for i := 0; i < len(cycle1); i++ {
+			if cycle1[(i+offset)%len(cycle1)] != cycle2[i] {
 				match = false
 				break
 			}
 		}
 		if match {
-			return
+			return true
 		}
 	}
-	t.Errorf("node %q: cycle with nodes %v not found in %v", r.NodeID, expectedPath, r.Cycles)
+	return false
 }
 
 // assertDeps checks both declared and used dependencies.
