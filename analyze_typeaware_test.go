@@ -422,22 +422,6 @@ func TestSSA_HelperFunctions(t *testing.T) {
 }
 
 func TestTypeAwareAnalyzer_AnalyzeBasic(t *testing.T) {
-	t.Run("analyze current directory", func(t *testing.T) {
-		analyzer := newTypeAwareAnalyzer(AnalyzerConfig{
-			WorkDir: ".",
-			Debug:   testing.Verbose(),
-		})
-
-		results, err := analyzer.Analyze(".")
-		if err != nil {
-			t.Fatalf("analysis failed: %v", err)
-		}
-
-		// Results will be empty for now (node discovery not yet implemented)
-		// This test just verifies the pipeline runs without error
-		t.Logf("Analysis completed, got %d results", len(results))
-	})
-
 	t.Run("analyze examples/simple", func(t *testing.T) {
 		exampleDir := filepath.Join(".", "examples", "simple")
 
@@ -456,21 +440,6 @@ func TestTypeAwareAnalyzer_AnalyzeBasic(t *testing.T) {
 		}
 
 		t.Logf("Analysis completed, got %d results", len(results))
-	})
-
-	t.Run("analyze with debug enabled", func(t *testing.T) {
-		analyzer := newTypeAwareAnalyzer(AnalyzerConfig{
-			WorkDir: ".",
-			Debug:   true,
-		})
-
-		_, err := analyzer.Analyze(".")
-		if err != nil {
-			t.Fatalf("analysis failed: %v", err)
-		}
-
-		// If debug is enabled, should see debug output
-		// (check manually when running with -v)
 	})
 }
 

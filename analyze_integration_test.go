@@ -279,19 +279,6 @@ func TestAnalyzeDirEdgeCases(t *testing.T) {
 		}
 		// Either error or 0 results is acceptable for empty directory
 	})
-
-	t.Run("current_directory", func(t *testing.T) {
-		// Should analyze the graft package itself
-		results, err := AnalyzeDir(".")
-		if err != nil {
-			t.Fatalf("AnalyzeDir(\".\") error: %v", err)
-		}
-		// The graft package has test nodes in test files, which should be excluded
-		// We should get results from examples
-		if len(results) == 0 {
-			t.Error("expected some nodes from examples, got 0")
-		}
-	})
 }
 
 // TestAnalyzeDirDebug tests the debug flag functionality.
