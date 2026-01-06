@@ -168,5 +168,127 @@ func helper() string {
 	}
 }
 
-// TestCheckDepsValid is covered by integration tests.
-// See TestValidateDepsIntegration for testing of the CheckDepsValid function.
+func TestAssertDepsValidWithVerbose(t *testing.T) {
+	code := `package test
+
+import (
+	"context"
+	"github.com/grindlemire/graft"
+)
+
+var node = graft.Node[string]{
+	ID: "mynode",
+	Run: func(ctx context.Context) (string, error) {
+		return "ok", nil
+	},
+}
+`
+	tmpDir := setupTestModule(t, map[string]string{
+		"test.go": code,
+	})
+
+	mock := &mockT{}
+	AssertDepsValid(mock, tmpDir, WithVerboseTesting())
+
+	// Should have verbose logs (analyzing directory message)
+	foundVerboseLog := false
+	for _, log := range mock.logs {
+		if strings.Contains(log, "analyzing") {
+			foundVerboseLog = true
+			break
+		}
+	}
+
+	if !foundVerboseLog {
+		t.Errorf("WithVerboseTesting should produce verbose logs, got logs: %v", mock.logs)
+	}
+}
+
+func TestAssertDepsValidSuccess(t *testing.T) {
+	// Use a real example directory that we know has valid nodes
+	mock := &mockT{}
+	AssertDepsValid(mock, "examples/simple")
+
+	// Should have no errors
+	if len(mock.errors) > 0 {
+		t.Errorf("expected no errors, got %d: %v", len(mock.errors), mock.errors)
+	}
+
+	if len(mock.fatals) > 0 {
+		t.Errorf("expected no fatals, got %d: %v", len(mock.fatals), mock.fatals)
+	}
+
+	// Should log success message when nodes are found
+	foundSuccess := false
+	for _, log := range mock.logs {
+		if strings.Contains(log, "validated") {
+			foundSuccess = true
+			break
+		}
+	}
+
+	if !foundSuccess {
+		t.Errorf("should log success message, got logs: %v", mock.logs)
+	}
+}
+
+func TestAssertDepsValidWithIssues(t *testing.T) {
+	// Use an example directory that has known issues
+	mock := &mockT{}
+	AssertDepsValid(mock, "examples/edgecases/undeclared_multiple")
+
+	// Should have errors for the issues found
+	if len(mock.errors) == 0 {
+		t.Error("expected errors for directory with issues, got none")
+	}
+
+	// Errors should mention the specific issues
+	foundUndeclared := false
+	for _, err := range mock.errors {
+		if strings.Contains(err, "undeclared") || strings.Contains(err, "uses Dep") {
+			foundUndeclared = true
+			break
+		}
+	}
+
+	if !foundUndeclared {
+		t.Errorf("expected error messages about undeclared deps, got: %v", mock.errors)
+	}
+}
+
+func TestAssertDepsValidVerboseWithIssues(t *testing.T) {
+	// Test verbose mode with issues
+	mock := &mockT{}
+	AssertDepsValid(mock, "examples/edgecases/unused_multiple", WithVerboseTesting())
+
+	// Should have errors
+	if len(mock.errors) == 0 {
+		t.Error("expected errors for directory with issues, got none")
+	}
+
+	// Should have verbose logs even with errors
+	foundVerboseLog := false
+	for _, log := range mock.logs {
+		if strings.Contains(log, "analyzing") || strings.Contains(log, "Node:") {
+			foundVerboseLog = true
+			break
+		}
+	}
+
+	if !foundVerboseLog {
+		t.Error("verbose mode should produce logs even when there are errors")
+	}
+
+	// Should have detailed error breakdown
+	foundUnused := false
+	for _, err := range mock.errors {
+		if strings.Contains(err, "declares") && strings.Contains(err, "never uses") {
+			foundUnused = true
+			break
+		}
+	}
+
+	if !foundUnused {
+		t.Errorf("expected detailed error messages about unused deps, got: %v", mock.errors)
+	}
+}
