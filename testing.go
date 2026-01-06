@@ -3,6 +3,8 @@ package graft
 import (
 	"sort"
 	"testing"
+
+	"github.com/grindlemire/graft/internal/typeaware"
 )
 
 // AssertOpts configures the behavior of AssertDepsValid.
@@ -70,10 +72,8 @@ func AssertDepsValid(t testing.TB, dir string, opts ...AssertOption) {
 	// Enable AST-level debug flags if requested
 	if cfg.Debug {
 		AnalyzeDirDebug = true
-		AnalyzeFileDebug = true
 		defer func() {
 			AnalyzeDirDebug = false
-			AnalyzeFileDebug = false
 		}()
 	}
 
@@ -151,6 +151,6 @@ func AssertDepsValid(t testing.TB, dir string, opts ...AssertOption) {
 //	        notify(r.NodeID, r.Undeclared, r.Unused)
 //	    }
 //	}
-func CheckDepsValid(dir string) ([]AnalysisResult, error) {
+func CheckDepsValid(dir string) ([]typeaware.Result, error) {
 	return AnalyzeDir(dir)
 }

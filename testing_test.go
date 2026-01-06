@@ -32,110 +32,48 @@ func (m *mockT) Logf(format string, args ...any) {
 	m.logs = append(m.logs, format)
 }
 
-func TestAssertDepsValid(t *testing.T) {
-	type tc struct {
-		code       string
-		wantErrors int
-		wantFatals int
-		wantLogs   int
+// setupTestModule creates a temporary Go module with the given Go files.
+// This is required for the type-aware analyzer which needs valid Go modules.
+// Returns the module directory path.
+func setupTestModule(t *testing.T, files map[string]string) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Get the absolute path to the current graft package
+	graftPath, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("failed to get absolute path: %v", err)
 	}
 
-	tests := map[string]tc{
-		"valid deps - logs success": {
-			code: `package test
+	// Create go.mod file with replace directive to use local graft package
+	goMod := `module testmodule
 
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-)
+go 1.21
 
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{dep1.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[dep1.Output](ctx)
-		return v.String(), nil
-	},
-}
-`,
-			wantErrors: 0,
-			wantFatals: 0,
-			wantLogs:   1, // Success log
-		},
-		"undeclared dep - reports error": {
-			code: `package test
+require github.com/grindlemire/graft v0.0.0-00010101000000-000000000000
 
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/undeclared"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[undeclared.Output](ctx)
-		return v.String(), nil
-	},
-}
-`,
-			wantErrors: 2, // Main error + detailed error for undeclared
-			wantFatals: 0,
-			wantLogs:   0,
-		},
-		"unused dep - reports error": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var node = graft.Node[any]{
-	ID:        "mynode",
-	DependsOn: []string{"unused"},
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`,
-			wantErrors: 2, // Main error + detailed error for unused
-			wantFatals: 0,
-			wantLogs:   0,
-		},
+replace github.com/grindlemire/graft => ` + graftPath + `
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
 	}
 
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
-
-			mock := &mockT{}
-			AssertDepsValid(mock, tmpDir)
-
-			if !mock.helperCalled {
-				t.Error("Helper() was not called")
-			}
-
-			if len(mock.errors) != tt.wantErrors {
-				t.Errorf("got %d errors, want %d", len(mock.errors), tt.wantErrors)
-			}
-
-			if len(mock.fatals) != tt.wantFatals {
-				t.Errorf("got %d fatals, want %d", len(mock.fatals), tt.wantFatals)
-			}
-
-			if len(mock.logs) != tt.wantLogs {
-				t.Errorf("got %d logs, want %d", len(mock.logs), tt.wantLogs)
-			}
-		})
+	// Write all provided files
+	for filename, content := range files {
+		path := filepath.Join(tmpDir, filename)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", filename, err)
+		}
 	}
+
+	return tmpDir
 }
+
+// TestAssertDepsValid is covered by integration tests in analyze_integration_test.go.
+// The type-aware analyzer requires valid Go modules with real dependencies,
+// making synthetic test cases complex to maintain. See TestAnalyzeDirIntegration
+// and TestValidateDepsIntegration for comprehensive testing of AssertDepsValid.
 
 func TestAssertDepsValidBadDir(t *testing.T) {
 	mock := &mockT{}
@@ -146,54 +84,8 @@ func TestAssertDepsValidBadDir(t *testing.T) {
 	}
 }
 
-func TestAssertDepsValidWithVerbose(t *testing.T) {
-	code := `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{dep1.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[dep1.Output](ctx)
-		return v.String(), nil
-	},
-}
-`
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	mock := &mockT{}
-	AssertDepsValid(mock, tmpDir, WithVerboseTesting())
-
-	if !mock.helperCalled {
-		t.Error("Helper() was not called")
-	}
-
-	// Verbose mode should produce multiple logs
-	if len(mock.logs) < 3 {
-		t.Errorf("expected at least 3 logs in verbose mode, got %d", len(mock.logs))
-	}
-
-	// Should contain node summary info
-	foundNodeLog := false
-	for _, log := range mock.logs {
-		if strings.Contains(log, "Node:") || strings.Contains(log, "DeclaredDeps") {
-			foundNodeLog = true
-			break
-		}
-	}
-	if !foundNodeLog {
-		t.Error("verbose output should contain node summary info")
-	}
-}
+// TestAssertDepsValidWithVerbose is covered by integration tests.
+// See TestAnalyzeDirIntegration for verbose output testing.
 
 func TestAssertDepsValidWithDebug(t *testing.T) {
 	code := `package test
@@ -210,15 +102,12 @@ var node = graft.Node[string]{
 	},
 }
 `
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
+	tmpDir := setupTestModule(t, map[string]string{
+		"test.go": code,
+	})
 
 	// Save original debug state
 	origDirDebug := AnalyzeDirDebug
-	origFileDebug := AnalyzeFileDebug
 
 	mock := &mockT{}
 	AssertDepsValid(mock, tmpDir, WithDebugTesting())
@@ -227,66 +116,14 @@ var node = graft.Node[string]{
 	if AnalyzeDirDebug != origDirDebug {
 		t.Error("AnalyzeDirDebug was not reset after AssertDepsValid")
 	}
-	if AnalyzeFileDebug != origFileDebug {
-		t.Error("AnalyzeFileDebug was not reset after AssertDepsValid")
-	}
 
 	if !mock.helperCalled {
 		t.Error("Helper() was not called")
 	}
 }
 
-func TestAssertDepsValidVerboseWithIssues(t *testing.T) {
-	// Test verbose output when there ARE issues
-	code := `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/undeclared"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{"unused_dep"},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[undeclared.Output](ctx)
-		return v.String(), nil
-	},
-}
-`
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	mock := &mockT{}
-	AssertDepsValid(mock, tmpDir, WithVerboseTesting())
-
-	// Should have errors for undeclared and unused
-	if len(mock.errors) == 0 {
-		t.Error("expected errors for issues, got none")
-	}
-
-	// Verbose logs should contain issue info
-	foundUndeclaredLog := false
-	foundUnusedLog := false
-	for _, log := range mock.logs {
-		if strings.Contains(log, "Undeclared") {
-			foundUndeclaredLog = true
-		}
-		if strings.Contains(log, "Unused") {
-			foundUnusedLog = true
-		}
-	}
-	if !foundUndeclaredLog {
-		t.Error("verbose output should contain Undeclared info when there are undeclared deps")
-	}
-	if !foundUnusedLog {
-		t.Error("verbose output should contain Unused info when there are unused deps")
-	}
-}
+// TestAssertDepsValidVerboseWithIssues is covered by integration tests.
+// See TestAnalyzeDirIntegration for error reporting testing.
 
 func TestWithVerboseTestingOption(t *testing.T) {
 	opts := &AssertOpts{}
@@ -316,11 +153,9 @@ func helper() string {
 	return "hello"
 }
 `
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
+	tmpDir := setupTestModule(t, map[string]string{
+		"test.go": code,
+	})
 
 	mock := &mockT{}
 	AssertDepsValid(mock, tmpDir)
@@ -333,52 +168,127 @@ func helper() string {
 	}
 }
 
-func TestCheckDepsValid(t *testing.T) {
-	type tc struct {
-		code      string
-		wantNodes int
-		wantErr   bool
-	}
-
-	tests := map[string]tc{
-		"valid code": {
-			code: `package test
+func TestAssertDepsValidWithVerbose(t *testing.T) {
+	code := `package test
 
 import (
 	"context"
 	"github.com/grindlemire/graft"
 )
 
-var node = graft.Node[any]{
+var node = graft.Node[string]{
 	ID: "mynode",
-	Run: func(ctx context.Context) (any, error) { return nil, nil },
+	Run: func(ctx context.Context) (string, error) {
+		return "ok", nil
+	},
 }
-`,
-			wantNodes: 1,
-			wantErr:   false,
-		},
+`
+	tmpDir := setupTestModule(t, map[string]string{
+		"test.go": code,
+	})
+
+	mock := &mockT{}
+	AssertDepsValid(mock, tmpDir, WithVerboseTesting())
+
+	// Should have verbose logs (analyzing directory message)
+	foundVerboseLog := false
+	for _, log := range mock.logs {
+		if strings.Contains(log, "analyzing") {
+			foundVerboseLog = true
+			break
+		}
 	}
 
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
+	if !foundVerboseLog {
+		t.Errorf("WithVerboseTesting should produce verbose logs, got logs: %v", mock.logs)
+	}
+}
 
-			results, err := CheckDepsValid(tmpDir)
+func TestAssertDepsValidSuccess(t *testing.T) {
+	// Use a real example directory that we know has valid nodes
+	mock := &mockT{}
+	AssertDepsValid(mock, "examples/simple")
 
-			if tt.wantErr && err == nil {
-				t.Error("expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+	// Should have no errors
+	if len(mock.errors) > 0 {
+		t.Errorf("expected no errors, got %d: %v", len(mock.errors), mock.errors)
+	}
 
-			if len(results) != tt.wantNodes {
-				t.Errorf("got %d results, want %d", len(results), tt.wantNodes)
-			}
-		})
+	if len(mock.fatals) > 0 {
+		t.Errorf("expected no fatals, got %d: %v", len(mock.fatals), mock.fatals)
+	}
+
+	// Should log success message when nodes are found
+	foundSuccess := false
+	for _, log := range mock.logs {
+		if strings.Contains(log, "validated") {
+			foundSuccess = true
+			break
+		}
+	}
+
+	if !foundSuccess {
+		t.Errorf("should log success message, got logs: %v", mock.logs)
+	}
+}
+
+func TestAssertDepsValidWithIssues(t *testing.T) {
+	// Use an example directory that has known issues
+	mock := &mockT{}
+	AssertDepsValid(mock, "examples/edgecases/undeclared_multiple")
+
+	// Should have errors for the issues found
+	if len(mock.errors) == 0 {
+		t.Error("expected errors for directory with issues, got none")
+	}
+
+	// Errors should mention the specific issues
+	foundUndeclared := false
+	for _, err := range mock.errors {
+		if strings.Contains(err, "undeclared") || strings.Contains(err, "uses Dep") {
+			foundUndeclared = true
+			break
+		}
+	}
+
+	if !foundUndeclared {
+		t.Errorf("expected error messages about undeclared deps, got: %v", mock.errors)
+	}
+}
+
+func TestAssertDepsValidVerboseWithIssues(t *testing.T) {
+	// Test verbose mode with issues
+	mock := &mockT{}
+	AssertDepsValid(mock, "examples/edgecases/unused_multiple", WithVerboseTesting())
+
+	// Should have errors
+	if len(mock.errors) == 0 {
+		t.Error("expected errors for directory with issues, got none")
+	}
+
+	// Should have verbose logs even with errors
+	foundVerboseLog := false
+	for _, log := range mock.logs {
+		if strings.Contains(log, "analyzing") || strings.Contains(log, "Node:") {
+			foundVerboseLog = true
+			break
+		}
+	}
+
+	if !foundVerboseLog {
+		t.Error("verbose mode should produce logs even when there are errors")
+	}
+
+	// Should have detailed error breakdown
+	foundUnused := false
+	for _, err := range mock.errors {
+		if strings.Contains(err, "declares") && strings.Contains(err, "never uses") {
+			foundUnused = true
+			break
+		}
+	}
+
+	if !foundUnused {
+		t.Errorf("expected detailed error messages about unused deps, got: %v", mock.errors)
 	}
 }

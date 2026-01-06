@@ -1,317 +1,309 @@
 package graft
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/grindlemire/graft/internal/typeaware"
 )
 
-func TestAnalyzeFile(t *testing.T) {
+// TestAnalyzeDirIntegration tests the type-aware analyzer on real example projects.
+func TestAnalyzeDirIntegration(t *testing.T) {
 	type tc struct {
-		code        string
-		wantNodes   int
-		wantIssues  int
-		checkResult func(t *testing.T, results []AnalysisResult)
+		dir        string
+		wantNodes  int
+		wantIssues int
+		// Expected node-specific checks (nodeID -> expectations)
+		nodeChecks map[string]struct {
+			declaredDeps []string
+			usedDeps     []string
+		}
+		// Expected node IDs to verify presence
+		wantNodeIDs []string
 	}
 
 	tests := map[string]tc{
-		"valid node with matching deps": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-	"myapp/nodes/dep2"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{dep1.ID, dep2.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v1, _ := graft.Dep[dep1.Output](ctx)
-		v2, _ := graft.Dep[dep2.Output](ctx)
-		return v1.String() + v2.String(), nil
-	},
-}
-`,
-			wantNodes:  1,
+		"examples/simple": {
+			dir:        "examples/simple",
+			wantNodes:  3,
 			wantIssues: 0,
-			checkResult: func(t *testing.T, results []AnalysisResult) {
-				if results[0].NodeID != "mynode" {
-					t.Errorf("got NodeID %q, want %q", results[0].NodeID, "mynode")
-				}
-				if len(results[0].DeclaredDeps) != 2 {
-					t.Errorf("got %d declared deps, want 2", len(results[0].DeclaredDeps))
-				}
-				if len(results[0].UsedDeps) != 2 {
-					t.Errorf("got %d used deps, want 2", len(results[0].UsedDeps))
-				}
+			nodeChecks: map[string]struct {
+				declaredDeps []string
+				usedDeps     []string
+			}{
+				"config": {declaredDeps: []string{}, usedDeps: []string{}},
+				"db":     {declaredDeps: []string{"config"}, usedDeps: []string{"config"}},
+				"app":    {declaredDeps: []string{"db"}, usedDeps: []string{"db"}},
 			},
 		},
-		"undeclared dependency": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-	"myapp/nodes/dep2"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{dep1.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v1, _ := graft.Dep[dep1.Output](ctx)
-		v2, _ := graft.Dep[dep2.Output](ctx) // not declared!
-		return v1.String() + v2.String(), nil
-	},
-}
-`,
-			wantNodes:  1,
-			wantIssues: 1,
-			checkResult: func(t *testing.T, results []AnalysisResult) {
-				if len(results[0].Undeclared) != 1 || results[0].Undeclared[0] != "dep2" {
-					t.Errorf("expected undeclared dep2, got %v", results[0].Undeclared)
-				}
+		"examples/complex": {
+			dir:        "examples/complex",
+			wantNodes:  9,
+			wantIssues: 0,
+			wantNodeIDs: []string{
+				"env", "logger", "secrets", "auth", "admin",
+				"cfg", "db", "user", "gateway",
 			},
 		},
-		"unused dependency": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-	"myapp/nodes/dep2"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{dep1.ID, dep2.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v1, _ := graft.Dep[dep1.Output](ctx)
-		// dep2 is declared but never used
-		return v1.String(), nil
-	},
-}
-`,
-			wantNodes:  1,
-			wantIssues: 1,
-			checkResult: func(t *testing.T, results []AnalysisResult) {
-				// With canonical forms, dep2.ID becomes "myapp/nodes/dep2.ID"
-				if len(results[0].Unused) != 1 {
-					t.Errorf("expected 1 unused dep, got %d: %v", len(results[0].Unused), results[0].Unused)
-				}
-				// Check that dep2 is reported (either as "dep2" or canonical form)
-				unused := results[0].Unused[0]
-				if unused != "dep2" && unused != "myapp/nodes/dep2.ID" {
-					t.Errorf("expected unused dep2 (or myapp/nodes/dep2.ID), got %v", results[0].Unused)
-				}
+		"examples/diamond": {
+			dir:        "examples/diamond",
+			wantNodes:  4,
+			wantIssues: 0,
+			nodeChecks: map[string]struct {
+				declaredDeps []string
+				usedDeps     []string
+			}{
+				"config": {declaredDeps: []string{}, usedDeps: []string{}},
+				"cache":  {declaredDeps: []string{"config"}, usedDeps: []string{"config"}},
+				"db":     {declaredDeps: []string{"config"}, usedDeps: []string{"config"}},
+				// api depends on both cache and db (diamond pattern)
 			},
 		},
-		"node without deps - no issues": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var node = graft.Node[string]{
-	ID: "standalone",
-	Run: func(ctx context.Context) (string, error) {
-		return "hello", nil
-	},
-}
-`,
-			wantNodes:  1,
+		"examples/fanout": {
+			dir:        "examples/fanout",
+			wantNodes:  7,
 			wantIssues: 0,
+			wantNodeIDs: []string{
+				"config", "svc1", "svc2", "svc3", "svc4", "svc5", "aggregator",
+			},
 		},
-		"multiple nodes": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/nodeA"
-)
-
-var nodeADef = graft.Node[string]{
-	ID: "nodeA",
-	Run: func(ctx context.Context) (string, error) {
-		return "a", nil
-	},
-}
-
-var nodeB = graft.Node[string]{
-	ID:        "nodeB",
-	DependsOn: []graft.ID{nodeA.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[nodeA.Output](ctx)
-		return v.String(), nil
-	},
-}
-`,
-			wantNodes:  2,
+		"examples/httpserver": {
+			dir:        "examples/httpserver",
+			wantNodes:  5,
 			wantIssues: 0,
-		},
-		"local Node type (not a graft.Node)": {
-			code: `package graft
-
-import (
-	"context"
-	"myapp/nodes/dep1"
-)
-
-var node = Node[string]{
-	ID:        "localnode",
-	DependsOn: []ID{dep1.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := Dep[dep1.Output](ctx)
-		return v.String(), nil
-	},
-}
-`,
-			wantNodes:  1,
-			wantIssues: 0,
-		},
-		"no nodes in file": {
-			code: `package test
-
-func helper() string {
-	return "hello"
-}
-`,
-			wantNodes:  0,
-			wantIssues: 0,
+			wantNodeIDs: []string{
+				"config", "request_logger", "admin", "db", "user",
+			},
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			// Write temp file
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
-
-			results, err := AnalyzeFile(tmpFile)
+			absDir, err := filepath.Abs(tt.dir)
 			if err != nil {
-				t.Fatalf("AnalyzeFile error: %v", err)
+				t.Fatalf("failed to get absolute path: %v", err)
 			}
 
+			results, err := AnalyzeDir(absDir)
+			if err != nil {
+				t.Fatalf("AnalyzeDir(%q) error: %v", tt.dir, err)
+			}
+
+			// Check node count
 			if len(results) != tt.wantNodes {
 				t.Errorf("got %d nodes, want %d", len(results), tt.wantNodes)
+				for _, r := range results {
+					t.Logf("  - %s", r.NodeID)
+				}
 			}
 
+			// Check issues count
 			issueCount := 0
 			for _, r := range results {
 				if r.HasIssues() {
 					issueCount++
+					t.Logf("Node %q has issues: %s", r.NodeID, r.String())
 				}
 			}
 			if issueCount != tt.wantIssues {
 				t.Errorf("got %d nodes with issues, want %d", issueCount, tt.wantIssues)
 			}
 
-			if tt.checkResult != nil && len(results) > 0 {
-				tt.checkResult(t, results)
+			// Map results by node ID for checking
+			nodeMap := make(map[string]typeaware.Result)
+			for _, r := range results {
+				nodeMap[r.NodeID] = r
+			}
+
+			// Check specific node dependencies if specified
+			for nodeID, expected := range tt.nodeChecks {
+				node, ok := nodeMap[nodeID]
+				if !ok {
+					t.Errorf("node %q not found in results", nodeID)
+					continue
+				}
+
+				if !equalStringSlices(node.DeclaredDeps, expected.declaredDeps) {
+					t.Errorf("%s: declared deps = %v, want %v",
+						nodeID, node.DeclaredDeps, expected.declaredDeps)
+				}
+
+				if !equalStringSlices(node.UsedDeps, expected.usedDeps) {
+					t.Errorf("%s: used deps = %v, want %v",
+						nodeID, node.UsedDeps, expected.usedDeps)
+				}
+			}
+
+			// Check expected node IDs if specified
+			if len(tt.wantNodeIDs) > 0 {
+				for _, id := range tt.wantNodeIDs {
+					if _, ok := nodeMap[id]; !ok {
+						t.Errorf("expected node %q not found", id)
+					}
+				}
 			}
 		})
 	}
 }
 
-func TestAnalyzeDir(t *testing.T) {
-	type tc struct {
-		files      map[string]string
-		wantNodes  int
-		wantIssues int
+// TestValidateDepsIntegration tests the ValidateDeps function on real examples.
+func TestValidateDepsIntegration(t *testing.T) {
+	tests := map[string]struct {
+		dir string
+	}{
+		"examples/simple":     {dir: "examples/simple"},
+		"examples/complex":    {dir: "examples/complex"},
+		"examples/diamond":    {dir: "examples/diamond"},
+		"examples/httpserver": {dir: "examples/httpserver"},
+		// Note: examples/fanout excluded (intentional cycle with svc5 ↔ svc5-2)
 	}
 
-	tests := map[string]tc{
-		"multiple files": {
-			files: map[string]string{
-				"node_a.go": `package test
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			absDir, err := filepath.Abs(tt.dir)
+			if err != nil {
+				t.Fatalf("failed to get absolute path: %v", err)
+			}
 
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var nodeA = graft.Node[string]{
-	ID: "nodeA",
-	Run: func(ctx context.Context) (string, error) { return "a", nil },
+			err = ValidateDeps(absDir)
+			if err != nil {
+				t.Errorf("ValidateDeps(%q) = %v, want nil", tt.dir, err)
+			}
+		})
+	}
 }
-`,
-				"node_b.go": `package test
 
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/nodeA"
-)
-
-var nodeB = graft.Node[string]{
-	ID:        "nodeB",
-	DependsOn: []graft.ID{nodeA.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[nodeA.Output](ctx)
-		return v.String(), nil
-	},
-}
-`,
-			},
-			wantNodes:  2,
-			wantIssues: 0,
+// TestAnalyzeDirErrors tests error handling for edge cases.
+func TestAnalyzeDirErrors(t *testing.T) {
+	tests := map[string]struct {
+		dir         string
+		wantErr     bool
+		wantResults int
+	}{
+		"nonexistent_directory": {
+			dir:         "/nonexistent/path/that/does/not/exist",
+			wantErr:     true,
+			wantResults: 0,
 		},
-		"skips test files": {
-			files: map[string]string{
-				"node.go": `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var node = graft.Node[any]{
-	ID: "realnode",
-	Run: func(ctx context.Context) (any, error) { return nil, nil },
-}
-`,
-				"node_test.go": `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var testNode = graft.Node[any]{
-	ID: "testnode",
-	Run: func(ctx context.Context) (any, error) { return nil, nil },
-}
-`,
-			},
-			wantNodes:  1, // Only the non-test file
-			wantIssues: 0,
+		"empty_directory": {
+			dir:         t.TempDir(),
+			wantErr:     true, // Type-aware analysis requires valid Go packages
+			wantResults: 0,
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
+			results, err := AnalyzeDir(tt.dir)
 
-			for filename, content := range tt.files {
-				path := filepath.Join(tmpDir, filename)
-				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-					t.Fatalf("failed to write %s: %v", filename, err)
-				}
+			if tt.wantErr && err == nil {
+				t.Error("expected error, got nil")
 			}
 
-			results, err := AnalyzeDir(tmpDir)
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			if len(results) != tt.wantResults {
+				t.Errorf("got %d results, want %d", len(results), tt.wantResults)
+			}
+		})
+	}
+}
+
+// TestAnalyzeDirDebug tests the debug flag functionality.
+func TestAnalyzeDirDebug(t *testing.T) {
+	// Save original value
+	originalDebug := AnalyzeDirDebug
+	defer func() { AnalyzeDirDebug = originalDebug }()
+
+	tests := map[string]struct {
+		debugFlag bool
+		wantNodes int
+	}{
+		"debug_enabled":  {debugFlag: true, wantNodes: 3},
+		"debug_disabled": {debugFlag: false, wantNodes: 3},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			AnalyzeDirDebug = tt.debugFlag
+
+			absDir, err := filepath.Abs("examples/simple")
+			if err != nil {
+				t.Fatalf("failed to get absolute path: %v", err)
+			}
+
+			results, err := AnalyzeDir(absDir)
+			if err != nil {
+				t.Fatalf("AnalyzeDir error: %v", err)
+			}
+
+			if len(results) != tt.wantNodes {
+				t.Errorf("expected %d nodes, got %d", tt.wantNodes, len(results))
+			}
+		})
+	}
+}
+
+// TestTypeAwareAnalyzerAccuracy tests specific scenarios where type-aware
+// analysis is more accurate than AST-based analysis.
+func TestTypeAwareAnalyzerAccuracy(t *testing.T) {
+	tests := map[string]struct {
+		dir          string
+		wantNodes    int
+		checkTypeRes func(t *testing.T, results []typeaware.Result)
+	}{
+		"handles_type_aliases": {
+			dir:       "examples/simple",
+			wantNodes: 3,
+			checkTypeRes: func(t *testing.T, results []typeaware.Result) {
+				// Type-aware analysis should resolve type aliases correctly
+				for _, r := range results {
+					if r.HasIssues() {
+						t.Errorf("node %q has issues (type alias problem?): %s",
+							r.NodeID, r.String())
+					}
+				}
+			},
+		},
+		"resolves_package_imports": {
+			dir:       "examples/simple",
+			wantNodes: 3,
+			checkTypeRes: func(t *testing.T, results []typeaware.Result) {
+				// Find db node and verify it correctly resolves config.Output to "config"
+				var dbNode *typeaware.Result
+				for i := range results {
+					if results[i].NodeID == "db" {
+						dbNode = &results[i]
+						break
+					}
+				}
+
+				if dbNode == nil {
+					t.Fatal("db node not found in results")
+				}
+
+				if len(dbNode.DeclaredDeps) != 1 || dbNode.DeclaredDeps[0] != "config" {
+					t.Errorf("expected declared dep 'config', got %v", dbNode.DeclaredDeps)
+				}
+
+				if len(dbNode.UsedDeps) != 1 || dbNode.UsedDeps[0] != "config" {
+					t.Errorf("expected used dep 'config', got %v", dbNode.UsedDeps)
+				}
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			absDir, err := filepath.Abs(tt.dir)
+			if err != nil {
+				t.Fatalf("failed to get absolute path: %v", err)
+			}
+
+			results, err := AnalyzeDir(absDir)
 			if err != nil {
 				t.Fatalf("AnalyzeDir error: %v", err)
 			}
@@ -320,998 +312,57 @@ var testNode = graft.Node[any]{
 				t.Errorf("got %d nodes, want %d", len(results), tt.wantNodes)
 			}
 
-			issueCount := 0
-			for _, r := range results {
-				if r.HasIssues() {
-					issueCount++
-				}
-			}
-			if issueCount != tt.wantIssues {
-				t.Errorf("got %d nodes with issues, want %d", issueCount, tt.wantIssues)
+			if tt.checkTypeRes != nil {
+				tt.checkTypeRes(t, results)
 			}
 		})
 	}
 }
 
-func TestValidateDeps(t *testing.T) {
-	type tc struct {
-		code    string
-		wantErr bool
-	}
-
-	tests := map[string]tc{
-		"valid deps - no error": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{dep1.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[dep1.Output](ctx)
-		return v.String(), nil
-	},
-}
-`,
-			wantErr: false,
-		},
-		"invalid deps - returns error": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/undeclared"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[undeclared.Output](ctx)
-		return v.String(), nil
-	},
-}
-`,
-			wantErr: true,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
-
-			err := ValidateDeps(tmpDir)
-
-			if tt.wantErr && err == nil {
-				t.Error("expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestAnalysisResultString(t *testing.T) {
-	type tc struct {
-		result     AnalysisResult
-		wantSubstr string
-		shouldBeOK bool
-	}
-
-	tests := map[string]tc{
-		"no issues": {
-			result: AnalysisResult{
-				NodeID:       "mynode",
-				File:         "test.go",
-				DeclaredDeps: []string{"a"},
-				UsedDeps:     []string{"a"},
-			},
-			wantSubstr: "OK",
-			shouldBeOK: true,
-		},
-		"undeclared deps": {
-			result: AnalysisResult{
-				NodeID:     "mynode",
-				File:       "test.go",
-				Undeclared: []string{"missing"},
-			},
-			wantSubstr: "undeclared",
-			shouldBeOK: false,
-		},
-		"unused deps": {
-			result: AnalysisResult{
-				NodeID: "mynode",
-				File:   "test.go",
-				Unused: []string{"extra"},
-			},
-			wantSubstr: "unused",
-			shouldBeOK: false,
-		},
-		"both issues": {
-			result: AnalysisResult{
-				NodeID:     "mynode",
-				File:       "test.go",
-				Undeclared: []string{"missing"},
-				Unused:     []string{"extra"},
-			},
-			shouldBeOK: false,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			s := tt.result.String()
-
-			if tt.shouldBeOK != !tt.result.HasIssues() {
-				t.Errorf("HasIssues() = %v, want %v", tt.result.HasIssues(), !tt.shouldBeOK)
-			}
-
-			if tt.wantSubstr != "" && !strings.Contains(s, tt.wantSubstr) {
-				t.Errorf("String() = %q, should contain %q", s, tt.wantSubstr)
-			}
-		})
-	}
-}
-
-func TestNodeWithIDConstant(t *testing.T) {
-	// Test getPackageNameAsID - when ID field references a constant like ID: ID
-	code := `package mypackage
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-)
-
-const ID = "mypackage"
-
-var node = graft.Node[string]{
-	ID:        ID,
-	DependsOn: []graft.ID{dep1.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[dep1.Output](ctx)
-		return v.String(), nil
-	},
-}
-`
-	tmpDir := t.TempDir()
-	// Create subdirectory to test package name extraction
-	subDir := filepath.Join(tmpDir, "mypackage")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		t.Fatalf("failed to create subdir: %v", err)
-	}
-	tmpFile := filepath.Join(subDir, "node.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	results, err := AnalyzeFile(tmpFile)
-	if err != nil {
-		t.Fatalf("AnalyzeFile error: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("got %d nodes, want 1", len(results))
-	}
-
-	// When ID is a constant reference, we use the package name (directory name)
-	if results[0].NodeID != "mypackage" {
-		t.Errorf("got NodeID %q, want %q", results[0].NodeID, "mypackage")
-	}
-}
-
-func TestExtractFromCall(t *testing.T) {
-	// Test extractFromCall - graft.ID("foo") and ID("foo") patterns
+// TestAnalysisResult_HasIssues tests the HasIssues method
+func TestAnalysisResult_HasIssues(t *testing.T) {
 	tests := map[string]struct {
-		code      string
-		wantNodes int
-		wantDeps  []string
-	}{
-		"graft.ID call in DependsOn": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{graft.ID("dep1"), graft.ID("dep2")},
-	Run: func(ctx context.Context) (string, error) {
-		return "ok", nil
-	},
-}
-`,
-			wantNodes: 1,
-			wantDeps:  []string{"dep1", "dep2"},
-		},
-		"local ID call in DependsOn": {
-			code: `package graft
-
-import (
-	"context"
-)
-
-var node = Node[string]{
-	ID:        "mynode",
-	DependsOn: []ID{ID("dep1"), ID("dep2")},
-	Run: func(ctx context.Context) (string, error) {
-		return "ok", nil
-	},
-}
-`,
-			wantNodes: 1,
-			wantDeps:  []string{"dep1", "dep2"},
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
-
-			results, err := AnalyzeFile(tmpFile)
-			if err != nil {
-				t.Fatalf("AnalyzeFile error: %v", err)
-			}
-
-			if len(results) != tt.wantNodes {
-				t.Fatalf("got %d nodes, want %d", len(results), tt.wantNodes)
-			}
-
-			if tt.wantDeps != nil {
-				for _, wantDep := range tt.wantDeps {
-					found := false
-					for _, d := range results[0].DeclaredDeps {
-						if d == wantDep {
-							found = true
-							break
-						}
-					}
-					if !found {
-						t.Errorf("expected declared dep %q not found in %v", wantDep, results[0].DeclaredDeps)
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestIsNodeTypeEdgeCases(t *testing.T) {
-	// Test isNodeType - non-generic Node, graft.Node, and IndexListExpr cases
-	tests := map[string]struct {
-		code      string
-		wantNodes int
-	}{
-		"non-generic Node (Ident)": {
-			// This tests the *ast.Ident case for backwards compat
-			code: `package graft
-
-import "context"
-
-type Node struct {
-	ID  string
-	Run func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	ID: "simplenode",
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`,
-			wantNodes: 1,
-		},
-		"non-generic graft.Node (SelectorExpr)": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-type Output = any
-
-// This is a hypothetical non-generic graft.Node usage
-var _ = struct {
-	graft.Node
-}{}
-
-// But the actual pattern we need to test
-var node = graft.Node[Output]{
-	ID: "testnode",
-	Run: func(ctx context.Context) (Output, error) {
-		return nil, nil
-	},
-}
-`,
-			wantNodes: 1,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
-
-			results, err := AnalyzeFile(tmpFile)
-			if err != nil {
-				t.Fatalf("AnalyzeFile error: %v", err)
-			}
-
-			if len(results) != tt.wantNodes {
-				t.Errorf("got %d nodes, want %d", len(results), tt.wantNodes)
-			}
-		})
-	}
-}
-
-func TestCheckDepCallIndexListExpr(t *testing.T) {
-	// Test checkDepCall with IndexListExpr (multiple type params)
-	// This is a future-proofing test for Dep[T, U] style calls
-	code := `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-)
-
-// Simulate a hypothetical multi-param generic call
-// In real code this doesn't exist, but the analyzer supports it
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{dep1.ID},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := graft.Dep[dep1.Output](ctx)
-		return v.String(), nil
-	},
-}
-`
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	results, err := AnalyzeFile(tmpFile)
-	if err != nil {
-		t.Fatalf("AnalyzeFile error: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("got %d nodes, want 1", len(results))
-	}
-}
-
-func TestExtractDependsOnEdgeCases(t *testing.T) {
-	// Test extractDependsOn with identifiers (local constants)
-	tests := map[string]struct {
-		code      string
-		wantNodes int
-		wantDeps  int
-	}{
-		"identifier deps (local constants)": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-const (
-	Dep1ID = "dep1"
-	Dep2ID = "dep2"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{Dep1ID, Dep2ID},
-	Run: func(ctx context.Context) (string, error) {
-		return "ok", nil
-	},
-}
-`,
-			wantNodes: 1,
-			wantDeps:  2,
-		},
-		"string literal deps": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{"dep1", "dep2", "dep3"},
-	Run: func(ctx context.Context) (string, error) {
-		return "ok", nil
-	},
-}
-`,
-			wantNodes: 1,
-			wantDeps:  3,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
-
-			results, err := AnalyzeFile(tmpFile)
-			if err != nil {
-				t.Fatalf("AnalyzeFile error: %v", err)
-			}
-
-			if len(results) != tt.wantNodes {
-				t.Fatalf("got %d nodes, want %d", len(results), tt.wantNodes)
-			}
-
-			if len(results[0].DeclaredDeps) != tt.wantDeps {
-				t.Errorf("got %d declared deps, want %d", len(results[0].DeclaredDeps), tt.wantDeps)
-			}
-		})
-	}
-}
-
-func TestRunFunctionReference(t *testing.T) {
-	// Test analyzeNodeLiteral with Run: funcName (function reference)
-	code := `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-	"myapp/nodes/dep1"
-)
-
-func run(ctx context.Context) (string, error) {
-	v, _ := graft.Dep[dep1.Output](ctx)
-	return v.String(), nil
-}
-
-var node = graft.Node[string]{
-	ID:        "mynode",
-	DependsOn: []graft.ID{dep1.ID},
-	Run:       run,
-}
-`
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	results, err := AnalyzeFile(tmpFile)
-	if err != nil {
-		t.Fatalf("AnalyzeFile error: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("got %d nodes, want 1", len(results))
-	}
-
-	// Should detect dep1 usage even though Run is a function reference
-	if len(results[0].UsedDeps) != 1 {
-		t.Errorf("got %d used deps, want 1", len(results[0].UsedDeps))
-	}
-
-	found := false
-	for _, d := range results[0].UsedDeps {
-		if d == "dep1" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected used dep 'dep1' not found in %v", results[0].UsedDeps)
-	}
-}
-
-func TestAnalyzeNodeLiteralEdgeCases(t *testing.T) {
-	// Test analyzeNodeLiteral edge cases
-	tests := map[string]struct {
-		code      string
-		wantNodes int
-	}{
-		"node without ID - skipped": {
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var node = graft.Node[string]{
-	Run: func(ctx context.Context) (string, error) {
-		return "ok", nil
-	},
-}
-`,
-			wantNodes: 0, // No ID means it's skipped
-		},
-		"non-KeyValueExpr elements - skipped gracefully": {
-			// This tests the path where elt is not *ast.KeyValueExpr
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var node = graft.Node[string]{
-	ID: "mynode",
-	Run: func(ctx context.Context) (string, error) {
-		return "ok", nil
-	},
-}
-`,
-			wantNodes: 1,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
-
-			results, err := AnalyzeFile(tmpFile)
-			if err != nil {
-				t.Fatalf("AnalyzeFile error: %v", err)
-			}
-
-			if len(results) != tt.wantNodes {
-				t.Errorf("got %d nodes, want %d", len(results), tt.wantNodes)
-			}
-		})
-	}
-}
-
-func TestLocalDepCall(t *testing.T) {
-	// Test checkDepCall with local Dep[T] (not graft.Dep[T])
-	code := `package graft
-
-import "context"
-
-var node = Node[string]{
-	ID:        "localnode",
-	DependsOn: []ID{"dep1"},
-	Run: func(ctx context.Context) (string, error) {
-		v, _ := Dep[dep1Output](ctx)
-		return v.String(), nil
-	},
-}
-
-type dep1Output struct{}
-func (d dep1Output) String() string { return "" }
-`
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	results, err := AnalyzeFile(tmpFile)
-	if err != nil {
-		t.Fatalf("AnalyzeFile error: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("got %d nodes, want 1", len(results))
-	}
-
-	// Should detect dep1Output usage with local Dep call
-	if len(results[0].UsedDeps) != 1 {
-		t.Errorf("got %d used deps, want 1: %v", len(results[0].UsedDeps), results[0].UsedDeps)
-	}
-}
-
-// TestSharedInterfacePackage tests that Dep[T] calls resolve to the correct node IDs
-// when multiple nodes in one package output different types, and another node depends on them.
-// This tests the bug where the analyzer incorrectly infers dependency IDs from the package name
-// of the type argument (e.g., Dep[ports.Executor] -> "ports") instead of resolving to the
-// actual node ID that outputs that type (e.g., "executor").
-func TestSharedInterfacePackage(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/sharedinterface")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	// Find the app node
-	var appResult *AnalysisResult
-	for i := range results {
-		if results[i].NodeID == "app" {
-			appResult = &results[i]
-			break
-		}
-	}
-	if appResult == nil {
-		t.Fatalf("app node not found in results. Got node IDs: %v", func() []string {
-			ids := make([]string, len(results))
-			for i := range results {
-				ids[i] = results[i].NodeID
-			}
-			return ids
-		}())
-	}
-
-	// Check that used deps are "executor" and "logger", NOT "ports" (the package name)
-	usedDepsMap := make(map[string]bool)
-	for _, dep := range appResult.UsedDeps {
-		usedDepsMap[dep] = true
-	}
-
-	if !usedDepsMap["executor"] {
-		t.Errorf("expected 'executor' in used deps, got %v", appResult.UsedDeps)
-	}
-	if !usedDepsMap["logger"] {
-		t.Errorf("expected 'logger' in used deps, got %v", appResult.UsedDeps)
-	}
-
-	// "ports" (the package name of the type argument) should NOT be detected as a used dep
-	if usedDepsMap["ports"] {
-		t.Errorf("'ports' should not be in used deps (it's the interface package, not a node ID), got %v", appResult.UsedDeps)
-	}
-
-	// The node should have no issues - all deps are properly declared
-	if appResult.HasIssues() {
-		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
-			appResult.Undeclared, appResult.Unused)
-	}
-}
-
-// TestSharedPackageWithImportAlias tests that Dep[T] calls resolve correctly
-// when using a custom import alias for the dependency package.
-func TestSharedPackageWithImportAlias(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/importaliases")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	var appResult *AnalysisResult
-	for i := range results {
-		if results[i].NodeID == "app" {
-			appResult = &results[i]
-			break
-		}
-	}
-	if appResult == nil {
-		t.Fatalf("app node not found")
-	}
-
-	// Should resolve svc.DBConnection to "database-service", not "svc" (the alias)
-	usedDepsMap := make(map[string]bool)
-	for _, dep := range appResult.UsedDeps {
-		usedDepsMap[dep] = true
-	}
-
-	if !usedDepsMap["database-service"] {
-		t.Errorf("expected 'database-service' in used deps, got %v", appResult.UsedDeps)
-	}
-
-	// "svc" (the alias) should NOT be detected as a used dep
-	if usedDepsMap["svc"] {
-		t.Errorf("'svc' should not be in used deps (it's an alias), got %v", appResult.UsedDeps)
-	}
-
-	if appResult.HasIssues() {
-		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
-			appResult.Undeclared, appResult.Unused)
-	}
-}
-
-// TestNodeIDVariableNameDoesNotMatter tests that the variable name used
-// to store the node ID constant doesn't affect dependency resolution.
-func TestNodeIDVariableNameDoesNotMatter(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/iddeclarations")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	var consumerResult *AnalysisResult
-	for i := range results {
-		if results[i].NodeID == "consumer" {
-			consumerResult = &results[i]
-			break
-		}
-	}
-	if consumerResult == nil {
-		t.Fatalf("consumer node not found")
-	}
-
-	if consumerResult.HasIssues() {
-		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
-			consumerResult.Undeclared, consumerResult.Unused)
-	}
-}
-
-// TestMultipleNodesInPackageWithDifferentIDPatterns tests resolution when
-// multiple nodes in the same package use different ID declaration patterns.
-func TestMultipleNodesInPackageWithDifferentIDPatterns(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/iddeclarations")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	var appResult *AnalysisResult
-	for i := range results {
-		if results[i].NodeID == "app" {
-			appResult = &results[i]
-			break
-		}
-	}
-	if appResult == nil {
-		t.Fatalf("app node not found")
-	}
-
-	usedDepsMap := make(map[string]bool)
-	for _, dep := range appResult.UsedDeps {
-		usedDepsMap[dep] = true
-	}
-
-	// All three dependencies should be resolved to their actual IDs
-	expectedDeps := []string{"cache-node", "database-node", "logger-node"}
-	for _, expected := range expectedDeps {
-		if !usedDepsMap[expected] {
-			t.Errorf("expected '%s' in used deps, got %v", expected, appResult.UsedDeps)
-		}
-	}
-
-	// "shared" (the package name) should NOT appear
-	if usedDepsMap["shared"] {
-		t.Errorf("'shared' should not be in used deps, got %v", appResult.UsedDeps)
-	}
-
-	if appResult.HasIssues() {
-		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
-			appResult.Undeclared, appResult.Unused)
-	}
-}
-
-// TestDeepNestedImportPath tests that deeply nested import paths resolve correctly.
-func TestDeepNestedImportPath(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/importpaths")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	var handlerResult *AnalysisResult
-	for i := range results {
-		if results[i].NodeID == "handler" {
-			handlerResult = &results[i]
-			break
-		}
-	}
-	if handlerResult == nil {
-		t.Fatalf("handler node not found")
-	}
-
-	usedDepsMap := make(map[string]bool)
-	for _, dep := range handlerResult.UsedDeps {
-		usedDepsMap[dep] = true
-	}
-
-	if !usedDepsMap["oauth-provider"] {
-		t.Errorf("expected 'oauth-provider' in used deps, got %v", handlerResult.UsedDeps)
-	}
-
-	// "providers" (the package name) should NOT appear
-	if usedDepsMap["providers"] {
-		t.Errorf("'providers' should not be in used deps, got %v", handlerResult.UsedDeps)
-	}
-
-	if handlerResult.HasIssues() {
-		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
-			handlerResult.Undeclared, handlerResult.Unused)
-	}
-}
-
-// TestMultipleImportAliasesSamePackage tests that the analyzer handles
-// when the same package is (hypothetically) imported with different aliases in different files.
-// This simulates the case where node resolution must work across files with different import styles.
-func TestMultipleImportAliasesSamePackage(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/importaliases")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	// Check both consumers
-	for _, consumerID := range []string{"consumer1", "consumer2"} {
-		var result *AnalysisResult
-		for i := range results {
-			if results[i].NodeID == consumerID {
-				result = &results[i]
-				break
-			}
-		}
-		if result == nil {
-			t.Fatalf("%s node not found", consumerID)
-		}
-
-		usedDepsMap := make(map[string]bool)
-		for _, dep := range result.UsedDeps {
-			usedDepsMap[dep] = true
-		}
-
-		if !usedDepsMap["config-node"] {
-			t.Errorf("%s: expected 'config-node' in used deps, got %v", consumerID, result.UsedDeps)
-		}
-
-		// Neither alias should appear
-		if usedDepsMap["t"] || usedDepsMap["apptypes"] || usedDepsMap["types"] {
-			t.Errorf("%s: aliases/package name should not be in used deps, got %v", consumerID, result.UsedDeps)
-		}
-
-		if result.HasIssues() {
-			t.Errorf("%s: expected no issues, but got: undeclared=%v, unused=%v",
-				consumerID, result.Undeclared, result.Unused)
-		}
-	}
-}
-
-// TestDependsOnWithDifferentIDFormats tests that DependsOn declarations work
-// with various formats: string literals, pkg.ID constants, and graft.ID() calls.
-func TestDependsOnWithDifferentIDFormats(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/dependencyformats")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	var appResult *AnalysisResult
-	for i := range results {
-		if results[i].NodeID == "app" {
-			appResult = &results[i]
-			break
-		}
-	}
-	if appResult == nil {
-		t.Fatalf("app node not found")
-	}
-
-	if appResult.HasIssues() {
-		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
-			appResult.Undeclared, appResult.Unused)
-	}
-
-	// Verify both declared deps are found (in some canonical form)
-	if len(appResult.DeclaredDeps) != 2 {
-		t.Errorf("expected 2 declared deps, got %d: %v", len(appResult.DeclaredDeps), appResult.DeclaredDeps)
-	}
-
-	if len(appResult.UsedDeps) != 2 {
-		t.Errorf("expected 2 used deps, got %d: %v", len(appResult.UsedDeps), appResult.UsedDeps)
-	}
-}
-
-// TestSameTypeNameDifferentPackages tests that the analyzer correctly distinguishes
-// between types with the same name but from different packages.
-func TestSameTypeNameDifferentPackages(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/typeresolution")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	var consumerResult *AnalysisResult
-	for i := range results {
-		if results[i].NodeID == "consumer" {
-			consumerResult = &results[i]
-			break
-		}
-	}
-	if consumerResult == nil {
-		t.Fatalf("consumer node not found")
-	}
-
-	usedDepsMap := make(map[string]bool)
-	for _, dep := range consumerResult.UsedDeps {
-		usedDepsMap[dep] = true
-	}
-
-	// Should resolve to the correct node IDs, not package names
-	if !usedDepsMap["pkg1-output"] {
-		t.Errorf("expected 'pkg1-output' in used deps, got %v", consumerResult.UsedDeps)
-	}
-	if !usedDepsMap["pkg2-output"] {
-		t.Errorf("expected 'pkg2-output' in used deps, got %v", consumerResult.UsedDeps)
-	}
-
-	// Package names should NOT appear
-	if usedDepsMap["pkg1"] || usedDepsMap["pkg2"] {
-		t.Errorf("package names should not be in used deps, got %v", consumerResult.UsedDeps)
-	}
-
-	if consumerResult.HasIssues() {
-		t.Errorf("expected no issues, but got: undeclared=%v, unused=%v",
-			consumerResult.Undeclared, consumerResult.Unused)
-	}
-}
-
-// TestPointerTypeOutputResolution tests that pointer types in Node output are handled.
-func TestPointerTypeOutputResolution(t *testing.T) {
-	results, err := AnalyzeDir("internal/testcases/typeresolution")
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	// Just verify no panics and basic structure works
-	foundProvider := false
-	foundPointerConsumer := false
-	for _, r := range results {
-		if r.NodeID == "connection-provider" {
-			foundProvider = true
-		}
-		if r.NodeID == "pointer-consumer" {
-			foundPointerConsumer = true
-			// Verify it has no issues
-			if r.HasIssues() {
-				t.Errorf("pointer-consumer: expected no issues, but got: undeclared=%v, unused=%v",
-					r.Undeclared, r.Unused)
-			}
-		}
-	}
-
-	if !foundProvider {
-		t.Error("connection-provider node not found")
-	}
-	if !foundPointerConsumer {
-		t.Error("pointer-consumer node not found")
-	}
-}
-
-func TestAnalysisResultHasIssues(t *testing.T) {
-	type tc struct {
 		result  AnalysisResult
 		wantHas bool
-	}
-
-	tests := map[string]tc{
-		"empty - no issues": {
-			result:  AnalysisResult{},
-			wantHas: false,
-		},
-		"declared and used match - no issues": {
+	}{
+		"no issues": {
 			result: AnalysisResult{
-				DeclaredDeps: []string{"a", "b"},
-				UsedDeps:     []string{"a", "b"},
+				NodeID:       "test",
+				DeclaredDeps: []string{},
+				UsedDeps:     []string{},
+				Undeclared:   []string{},
+				Unused:       []string{},
+				Cycles:       [][]string{},
 			},
 			wantHas: false,
 		},
 		"has undeclared": {
 			result: AnalysisResult{
-				Undeclared: []string{"x"},
+				NodeID:     "test",
+				Undeclared: []string{"dep1"},
 			},
 			wantHas: true,
 		},
 		"has unused": {
 			result: AnalysisResult{
-				Unused: []string{"y"},
+				NodeID: "test",
+				Unused: []string{"dep1"},
+			},
+			wantHas: true,
+		},
+		"has cycles": {
+			result: AnalysisResult{
+				NodeID: "test",
+				Cycles: [][]string{{"a", "b", "a"}},
+			},
+			wantHas: true,
+		},
+		"has all issues": {
+			result: AnalysisResult{
+				NodeID:     "test",
+				Undeclared: []string{"dep1"},
+				Unused:     []string{"dep2"},
+				Cycles:     [][]string{{"a", "b", "a"}},
 			},
 			wantHas: true,
 		},
@@ -1327,582 +378,228 @@ func TestAnalysisResultHasIssues(t *testing.T) {
 	}
 }
 
-// TestNonGenericNodeAnalysis tests the old code path for non-generic Node literals.
-// This exercises analyzeNodeLiteral, getPackageNameAsID, extractDependsOn, and extractFromCall.
-func TestNonGenericNodeAnalysis(t *testing.T) {
+// TestAnalysisResult_String tests the String method
+func TestAnalysisResult_String(t *testing.T) {
 	tests := map[string]struct {
-		code           string
-		wantNodes      int
-		wantDeclared   int
-		wantUsed       int
-		wantUndeclared int
-		wantUnused     int
+		result       AnalysisResult
+		wantContains []string
 	}{
-		"non-generic node with string literal ID": {
-			// Non-generic Node - exercises analyzeNodeLiteral path
-			code: `package graft
-
-import "context"
-
-// Simulate non-generic Node type
-type Node struct {
-	ID        string
-	DependsOn []string
-	Run       func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	ID:        "simplenode",
-	DependsOn: []string{"dep1", "dep2"},
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`,
-			wantNodes:    1,
-			wantDeclared: 2, // "dep1", "dep2"
+		"no issues": {
+			result: AnalysisResult{
+				NodeID:       "mynode",
+				File:         "myfile.go",
+				DeclaredDeps: []string{},
+				UsedDeps:     []string{},
+				Undeclared:   []string{},
+				Unused:       []string{},
+				Cycles:       [][]string{},
+			},
+			wantContains: []string{"mynode", "OK"},
 		},
-		"non-generic node with identifier ID (exercises getPackageNameAsID)": {
-			// This tests the ID: SomeConst path which uses getPackageNameAsID
-			code: `package graft
-
-import "context"
-
-const NodeID = "myconst"
-
-type Node struct {
-	ID  string
-	Run func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	ID:  NodeID,
-	Run: func(ctx context.Context) (any, error) { return nil, nil },
-}
-`,
-			wantNodes: 1,
+		"undeclared only": {
+			result: AnalysisResult{
+				NodeID:     "mynode",
+				File:       "myfile.go",
+				Undeclared: []string{"dep1", "dep2"},
+			},
+			wantContains: []string{
+				"mynode",
+				"myfile.go",
+				"undeclared deps",
+				"dep1",
+				"dep2",
+			},
 		},
-		"non-generic node DependsOn with selector expressions": {
-			// Tests extractDependsOn with pkg.ID style
-			code: `package graft
-
-import "context"
-
-type Node struct {
-	ID        string
-	DependsOn []string
-	Run       func(ctx context.Context) (any, error)
-}
-
-type dep1 struct{}
-type dep2 struct{}
-
-var _ = dep1{}
-var _ = dep2{}
-
-var node = Node{
-	ID:        "mynode",
-	DependsOn: []string{"dep1", "dep2"},
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`,
-			wantNodes:    1,
-			wantDeclared: 2,
+		"unused only": {
+			result: AnalysisResult{
+				NodeID: "mynode",
+				File:   "myfile.go",
+				Unused: []string{"dep1", "dep2"},
+			},
+			wantContains: []string{
+				"mynode",
+				"myfile.go",
+				"unused deps",
+				"dep1",
+				"dep2",
+			},
 		},
-		"non-generic node with graft.ID() calls in DependsOn": {
-			// Tests extractFromCall via extractDependsOn
-			code: `package graft
-
-import "context"
-
-type ID string
-
-func MakeID(s string) ID { return ID(s) }
-
-type Node struct {
-	ID        string
-	DependsOn []ID
-	Run       func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	ID:        "mynode",
-	DependsOn: []ID{ID("foo"), ID("bar")},
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`,
-			wantNodes:    1,
-			wantDeclared: 2,
+		"cycles only": {
+			result: AnalysisResult{
+				NodeID: "mynode",
+				File:   "myfile.go",
+				Cycles: [][]string{
+					{"a", "b", "c", "a"},
+				},
+			},
+			wantContains: []string{
+				"mynode",
+				"myfile.go",
+				"cycles",
+				"a → b → c → a",
+			},
 		},
-		"non-generic node with function reference Run": {
-			// Tests the funcDecls lookup path in analyzeNodeLiteral
-			code: `package graft
-
-import "context"
-
-type Node struct {
-	ID  string
-	Run func(ctx context.Context) (any, error)
-}
-
-func run(ctx context.Context) (any, error) {
-	return nil, nil
-}
-
-var node = Node{
-	ID:  "funcrefnode",
-	Run: run,
-}
-`,
-			wantNodes: 1,
+		"multiple cycles": {
+			result: AnalysisResult{
+				NodeID: "hub",
+				File:   "hub.go",
+				Cycles: [][]string{
+					{"hub", "spoke1", "hub"},
+					{"hub", "spoke2", "hub"},
+				},
+			},
+			wantContains: []string{
+				"hub",
+				"hub.go",
+				"cycles",
+				"hub → spoke1 → hub",
+				"hub → spoke2 → hub",
+			},
+		},
+		"all issues combined": {
+			result: AnalysisResult{
+				NodeID:     "mynode",
+				File:       "myfile.go",
+				Undeclared: []string{"config"},
+				Unused:     []string{"db", "cache"},
+				Cycles: [][]string{
+					{"mynode", "other", "mynode"},
+				},
+			},
+			wantContains: []string{
+				"mynode",
+				"myfile.go",
+				"undeclared deps",
+				"config",
+				"unused deps",
+				"db",
+				"cache",
+				"cycles",
+				"mynode → other → mynode",
+			},
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			subDir := filepath.Join(tmpDir, "testpkg")
-			if err := os.MkdirAll(subDir, 0755); err != nil {
-				t.Fatalf("failed to create subdir: %v", err)
-			}
-			tmpFile := filepath.Join(subDir, "node.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
+			got := tt.result.String()
 
-			results, err := AnalyzeFile(tmpFile)
-			if err != nil {
-				t.Fatalf("AnalyzeFile error: %v", err)
-			}
-
-			if len(results) != tt.wantNodes {
-				t.Errorf("got %d nodes, want %d", len(results), tt.wantNodes)
-			}
-
-			if tt.wantDeclared > 0 && len(results) > 0 {
-				if len(results[0].DeclaredDeps) != tt.wantDeclared {
-					t.Errorf("got %d declared deps, want %d: %v", len(results[0].DeclaredDeps), tt.wantDeclared, results[0].DeclaredDeps)
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("String() = %q should contain %q", got, want)
 				}
 			}
 		})
 	}
 }
 
-// TestAnalyzeFileDebugMode exercises debug output paths in analyzeNodeLiteral
-func TestAnalyzeFileDebugMode(t *testing.T) {
-	// Enable debug mode
-	oldDebug := AnalyzeFileDebug
-	AnalyzeFileDebug = true
-	defer func() { AnalyzeFileDebug = oldDebug }()
-
-	code := `package graft
-
-import "context"
-
-type Node struct {
-	ID        string
-	DependsOn []string
-	Run       func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	ID:        "debugnode",
-	DependsOn: []string{"dep1"},
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	// Just verify it doesn't panic with debug enabled
-	results, err := AnalyzeFile(tmpFile)
-	if err != nil {
-		t.Fatalf("AnalyzeFile error: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Errorf("got %d nodes, want 1", len(results))
-	}
-}
-
-// TestAnalyzeDirDebugMode exercises debug output paths in AnalyzeDir
-func TestAnalyzeDirDebugMode(t *testing.T) {
-	oldDebug := AnalyzeDirDebug
-	AnalyzeDirDebug = true
-	defer func() { AnalyzeDirDebug = oldDebug }()
-
-	tmpDir := t.TempDir()
-	code := `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-var node = graft.Node[string]{
-	ID: "debugtest",
-	Run: func(ctx context.Context) (string, error) {
-		return "ok", nil
-	},
-}
-`
-	if err := os.WriteFile(filepath.Join(tmpDir, "node.go"), []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	// Just verify it doesn't panic with debug enabled
-	results, err := AnalyzeDir(tmpDir)
-	if err != nil {
-		t.Fatalf("AnalyzeDir error: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Errorf("got %d nodes, want 1", len(results))
-	}
-}
-
-// TestIsNodeTypeForCollectionEdgeCases exercises additional isNodeTypeForCollection paths
-func TestIsNodeTypeForCollectionEdgeCases(t *testing.T) {
+// TestValidateDeps tests the ValidateDeps function
+func TestValidateDeps(t *testing.T) {
 	tests := map[string]struct {
-		code      string
-		wantNodes int
+		dir     string
+		wantErr bool
 	}{
-		"IndexListExpr with multiple type params": {
-			// Future-proofing: Node[T, U, V] style
-			code: `package test
-
-import (
-	"context"
-	"github.com/grindlemire/graft"
-)
-
-// This simulates how multi-param generics would look
-var node = graft.Node[string]{
-	ID: "multitype",
-	Run: func(ctx context.Context) (string, error) {
-		return "ok", nil
-	},
-}
-`,
-			wantNodes: 1,
+		"valid directory - simple": {
+			dir:     "examples/simple",
+			wantErr: false,
+		},
+		"valid directory - complex": {
+			dir:     "examples/complex",
+			wantErr: false,
+		},
+		"invalid directory - nonexistent": {
+			dir:     "/nonexistent/path",
+			wantErr: true,
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
+			err := ValidateDeps(tt.dir)
+
+			if tt.wantErr && err == nil {
+				t.Error("ValidateDeps() expected error, got nil")
 			}
 
-			results, err := AnalyzeFile(tmpFile)
+			if !tt.wantErr && err != nil {
+				t.Errorf("ValidateDeps() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidateDepsWithIssues tests ValidateDeps with actual dependency issues
+func TestValidateDepsWithIssues(t *testing.T) {
+	// Test with a known directory that has issues (undeclared)
+	err := ValidateDeps("examples/edgecases/undeclared_multiple")
+	if err == nil {
+		t.Error("ValidateDeps() expected error for directory with issues, got nil")
+	}
+
+	// Error message should contain information about the issue
+	if !strings.Contains(err.Error(), "dependency validation failed") {
+		t.Errorf("error should contain 'dependency validation failed', got: %v", err)
+	}
+}
+
+// TestCheckDepsValid tests the CheckDepsValid function
+func TestCheckDepsValid(t *testing.T) {
+	tests := map[string]struct {
+		dir         string
+		wantErr     bool
+		wantResults int
+	}{
+		"valid directory": {
+			dir:         "examples/simple",
+			wantErr:     false,
+			wantResults: 3, // config, db, app
+		},
+		"invalid directory": {
+			dir:     "/nonexistent/path",
+			wantErr: true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			results, err := CheckDepsValid(tt.dir)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("CheckDepsValid() expected error, got nil")
+				}
+				return
+			}
+
 			if err != nil {
-				t.Fatalf("AnalyzeFile error: %v", err)
+				t.Errorf("CheckDepsValid() unexpected error: %v", err)
+				return
 			}
 
-			if len(results) != tt.wantNodes {
-				t.Errorf("got %d nodes, want %d", len(results), tt.wantNodes)
-			}
-		})
-	}
-}
-
-// TestMatchesDeclaredDepEdgeCases tests additional matching patterns
-func TestMatchesDeclaredDepEdgeCases(t *testing.T) {
-	tests := map[string]struct {
-		usedDep      string
-		declaredDeps map[string]bool
-		wantMatch    bool
-	}{
-		"exact match": {
-			usedDep:      "dep1",
-			declaredDeps: map[string]bool{"dep1": true},
-			wantMatch:    true,
-		},
-		"suffix match with dot": {
-			usedDep:      "dep1",
-			declaredDeps: map[string]bool{"pkg.dep1": true},
-			wantMatch:    true,
-		},
-		"suffix match with slash": {
-			usedDep:      "dep1",
-			declaredDeps: map[string]bool{"myapp/nodes/dep1": true},
-			wantMatch:    true,
-		},
-		"suffix match with .ID": {
-			usedDep:      "dep1",
-			declaredDeps: map[string]bool{"dep1.ID": true},
-			wantMatch:    true,
-		},
-		"full path .ID match": {
-			usedDep:      "dep1",
-			declaredDeps: map[string]bool{"myapp/nodes/dep1.ID": true},
-			wantMatch:    true,
-		},
-		"no match": {
-			usedDep:      "dep1",
-			declaredDeps: map[string]bool{"dep2": true},
-			wantMatch:    false,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := matchesDeclaredDep(tt.usedDep, tt.declaredDeps)
-			if got != tt.wantMatch {
-				t.Errorf("matchesDeclaredDep(%q, %v) = %v, want %v", tt.usedDep, tt.declaredDeps, got, tt.wantMatch)
+			if len(results) != tt.wantResults {
+				t.Errorf("CheckDepsValid() got %d results, want %d", len(results), tt.wantResults)
 			}
 		})
 	}
 }
 
-// TestMatchesUsedDepEdgeCases tests additional matching patterns
-func TestMatchesUsedDepEdgeCases(t *testing.T) {
-	tests := map[string]struct {
-		declaredDep string
-		usedDeps    map[string]bool
-		wantMatch   bool
-	}{
-		"exact match": {
-			declaredDep: "dep1",
-			usedDeps:    map[string]bool{"dep1": true},
-			wantMatch:   true,
-		},
-		"package path to short form": {
-			declaredDep: "myapp/nodes/dep1",
-			usedDeps:    map[string]bool{"dep1": true},
-			wantMatch:   true,
-		},
-		"with .ID suffix": {
-			declaredDep: "myapp/nodes/dep1.ID",
-			usedDeps:    map[string]bool{"dep1": true},
-			wantMatch:   true,
-		},
-		"shared.ID1 to ID1": {
-			declaredDep: "shared.ID1",
-			usedDeps:    map[string]bool{"ID1": true},
-			wantMatch:   true,
-		},
-		"no match": {
-			declaredDep: "dep1",
-			usedDeps:    map[string]bool{"dep2": true},
-			wantMatch:   false,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := matchesUsedDep(tt.declaredDep, tt.usedDeps)
-			if got != tt.wantMatch {
-				t.Errorf("matchesUsedDep(%q, %v) = %v, want %v", tt.declaredDep, tt.usedDeps, got, tt.wantMatch)
-			}
-		})
-	}
-}
-
-// TestExtractDependsOnSelectorExpressions tests the extractDependsOn method with pkg.ID patterns
-func TestExtractDependsOnSelectorExpressions(t *testing.T) {
-	// This exercises the selector expression path in nodeAnalyzer.extractDependsOn
-	code := `package graft
-
-import "context"
-
-type ID string
-
-type dep1pkg struct{}
-type dep2pkg struct{}
-
-var ID1 ID = "dep1"
-var ID2 ID = "dep2"
-
-type Node struct {
-	ID        string
-	DependsOn []ID
-	Run       func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	ID:        "selectortest",
-	DependsOn: []ID{dep1pkg.ID, dep2pkg.ID},
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`
-	tmpDir := t.TempDir()
-	subDir := filepath.Join(tmpDir, "testpkg")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		t.Fatalf("failed to create subdir: %v", err)
-	}
-	tmpFile := filepath.Join(subDir, "node.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	results, err := AnalyzeFile(tmpFile)
+// TestCheckDepsValidWithIssues tests CheckDepsValid returns results with issues
+func TestCheckDepsValidWithIssues(t *testing.T) {
+	results, err := CheckDepsValid("examples/edgecases/undeclared_multiple")
 	if err != nil {
-		t.Fatalf("AnalyzeFile error: %v", err)
+		t.Fatalf("CheckDepsValid() unexpected error: %v", err)
 	}
 
-	if len(results) != 1 {
-		t.Fatalf("got %d nodes, want 1", len(results))
+	// Should find results with issues
+	foundIssue := false
+	for _, r := range results {
+		if r.HasIssues() {
+			foundIssue = true
+			break
+		}
 	}
 
-	// Should extract deps from selector expressions
-	if len(results[0].DeclaredDeps) != 2 {
-		t.Errorf("got %d declared deps, want 2: %v", len(results[0].DeclaredDeps), results[0].DeclaredDeps)
-	}
-}
-
-// TestNonGenericNodeWithIDCall tests extractFromCall in DependsOn
-func TestNonGenericNodeWithIDCall(t *testing.T) {
-	// This exercises the extractFromCall path via graft.ID("foo") calls
-	code := `package graft
-
-import "context"
-
-type ID string
-
-func MakeID(s string) ID { return ID(s) }
-
-type Node struct {
-	ID        string
-	DependsOn []ID
-	Run       func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	ID:        "idcalltest",
-	DependsOn: []ID{ID("dep1"), ID("dep2")},
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`
-	tmpDir := t.TempDir()
-	subDir := filepath.Join(tmpDir, "testpkg")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		t.Fatalf("failed to create subdir: %v", err)
-	}
-	tmpFile := filepath.Join(subDir, "node.go")
-	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-
-	results, err := AnalyzeFile(tmpFile)
-	if err != nil {
-		t.Fatalf("AnalyzeFile error: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Fatalf("got %d nodes, want 1", len(results))
-	}
-
-	// Should extract deps from ID() calls
-	if len(results[0].DeclaredDeps) != 2 {
-		t.Errorf("got %d declared deps, want 2: %v", len(results[0].DeclaredDeps), results[0].DeclaredDeps)
-	}
-}
-
-// TestAnalyzeNodeLiteralDebugPaths exercises debug output in analyzeNodeLiteral
-func TestAnalyzeNodeLiteralDebugPaths(t *testing.T) {
-	oldDebug := AnalyzeFileDebug
-	AnalyzeFileDebug = true
-	defer func() { AnalyzeFileDebug = oldDebug }()
-
-	// Test with various patterns to exercise debug paths
-	tests := map[string]struct {
-		code      string
-		wantNodes int
-	}{
-		"with inline Run function": {
-			code: `package graft
-
-import "context"
-
-type Node struct {
-	ID        string
-	DependsOn []string
-	Run       func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	ID:        "inlinerun",
-	DependsOn: []string{"dep1"},
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`,
-			wantNodes: 1,
-		},
-		"with function reference Run": {
-			code: `package graft
-
-import "context"
-
-type Node struct {
-	ID  string
-	Run func(ctx context.Context) (any, error)
-}
-
-func run(ctx context.Context) (any, error) {
-	return nil, nil
-}
-
-var node = Node{
-	ID:  "funcref",
-	Run: run,
-}
-`,
-			wantNodes: 1,
-		},
-		"missing ID field": {
-			code: `package graft
-
-import "context"
-
-type Node struct {
-	ID  string
-	Run func(ctx context.Context) (any, error)
-}
-
-var node = Node{
-	Run: func(ctx context.Context) (any, error) {
-		return nil, nil
-	},
-}
-`,
-			wantNodes: 0, // No ID means nil result
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			tmpFile := filepath.Join(tmpDir, "test.go")
-			if err := os.WriteFile(tmpFile, []byte(tt.code), 0644); err != nil {
-				t.Fatalf("failed to write temp file: %v", err)
-			}
-
-			results, err := AnalyzeFile(tmpFile)
-			if err != nil {
-				t.Fatalf("AnalyzeFile error: %v", err)
-			}
-
-			if len(results) != tt.wantNodes {
-				t.Errorf("got %d nodes, want %d", len(results), tt.wantNodes)
-			}
-		})
+	if !foundIssue {
+		t.Error("CheckDepsValid() should return results with issues for undeclared_multiple")
 	}
 }
