@@ -11,7 +11,7 @@
   <a href="./examples"><img src="https://img.shields.io/badge/Examples-📂-green.svg?cacheSeconds=86400" alt="Examples"></a>
 </p>
 
-Lightweight, type-safe dependency injection and execution graphs for Go.
+Lightweight, type-safe task graphs for wiring Go services across many teams.
 
 ```text
 Example Graph:
